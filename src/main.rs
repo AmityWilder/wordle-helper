@@ -2,7 +2,7 @@ use std::io::stdin;
 use arrayvec::ArrayVec;
 use guess::*;
 
-use crate::word::Letter;
+use crate::word::{Letter, Word};
 
 pub const VERBOSE_MESSAGES: bool = false;
 
@@ -70,12 +70,13 @@ fn main() {
       },
     ));
     attempts.push(feedback.map(|(_, stat)| stat));
-    guesser.analyze(feedback);
-    if let Some(word) = guesser.confirmed_word() {
+    if attempts.0.last() == Some(&[CharStatus::Confirmed; 5]) {
       println!("{attempts}");
+      let word = Word(feedback.map(|(ch, _)| ch));
       println!("success! winning word: {word}");
       return;
     }
+    guesser.analyze(feedback);
     guesser.prune();
     print!("candidates:");
     for (n, word) in (0..7).cycle().zip(guesser.candidates()) {
@@ -90,7 +91,7 @@ fn main() {
 
 #[cfg(test)]
 mod test {
-  use crate::{dictionary::FIVE_LETTER_WORDS, guess::Guesser, play::Player, Attempts};
+  use crate::{dictionary::FIVE_LETTER_WORDS, guess::{CharStatus, Guesser}, play::Player, Attempts};
   use rand::{prelude::*, rng};
 
   #[test]
@@ -109,14 +110,13 @@ mod test {
         guesses.push((*guess, guesser.candidates().len()));
         let stats = game.check(guess);
         attempts.push(stats);
-        guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
-        if let Some(winner) = guesser.confirmed_word() {
-          assert_eq!(&winner, word);
+        if guess == word {
           println!("won on turn {turn}");
           final_boards.push((round, word, attempts, guesses));
           candidates_buf = Some(guesser.extract_resources());
           continue 'rounds;
         }
+        guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
         guesser.prune();
         assert!(guesser.candidates().contains(word), "should never remove actual word from candidates");
       }
@@ -143,12 +143,12 @@ mod test {
       for i in 1..=6 {
         let guess = guesser.guess().unwrap();
         let stats = game.check(guess);
-        guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
-        if guesser.confirmed_word().is_some() {
+        if guess == word {
           turns.push(Some(i));
           candidates_buf = Some(guesser.extract_resources());
           continue 'rounds;
         }
+        guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
         guesser.prune();
       }
       turns.push(None);
@@ -211,7 +211,7 @@ mod test {
         }
         print!(": {n:>5} ");
         let col = color[turns as usize];
-        for _ in 0..((n as f64/most as f64)*20.0).floor() as usize {
+        for _ in 0..((n as f64/most as f64)*30.0).floor() as usize {
           print!("{col}");
         }
         println!();

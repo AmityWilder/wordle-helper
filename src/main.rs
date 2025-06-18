@@ -45,7 +45,7 @@ fn main() {
 
   for turn in 1..=6 {
     println!("turn {turn} ({} remaining):", 6 - turn);
-    if let Some(s) = guesser.guess(turn) {
+    if let Some(s) = guesser.guess() {
       println!("suggestion: {s}");
     } else {
       println!("no such word exists in my dictionary");
@@ -105,7 +105,7 @@ mod test {
       let mut guesses = Vec::new();
       let mut attempts = Attempts::new();
       for turn in 1..=6 {
-        let guess = guesser.guess(turn).expect("should always have a suggestion");
+        let guess = guesser.guess().expect("should always have a suggestion");
         guesses.push((*guess, guesser.candidates().len()));
         let stats = game.check(guess);
         attempts.push(stats);
@@ -141,7 +141,7 @@ mod test {
       let game = Player::new(*word);
       let mut guesser = Guesser::new(candidates_buf.take().unwrap());
       for i in 1..=6 {
-        let guess = guesser.guess(i).unwrap();
+        let guess = guesser.guess().unwrap();
         let stats = game.check(guess);
         guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
         if guesser.confirmed_word().is_some() {

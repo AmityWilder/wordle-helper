@@ -342,17 +342,13 @@ pub fn sort_by_frequency(words: &mut [Word]) {
     }
   }
 
-  // the most unimaginably average word that somehow has every
-  // letter appear, in their exact positions, in *every* word.
-  let max_word_score = words.len() as u32 * 5;
-
-  words.sort_by_cached_key(|word| {
-    max_word_score - word.iter()
+  words.sort_by_cached_key(|word|
+    u32::MAX - word.iter()
       .copied()
       .enumerate()
       .map(|(i, ch)| freq_analysis[i][ch.index()])
       .sum::<u32>()
-  });
+  );
 
   // partition unique words to the front
   words.sort_by_cached_key(|word| !word.is_unique());

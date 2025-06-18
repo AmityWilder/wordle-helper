@@ -75,12 +75,8 @@ impl Guesser {
     self.candidates
   }
 
-  pub fn guess(&self, turn: u32) -> Option<&Word> {
-    if turn <= 6 {
-      self.candidates.first()
-    } else {
-      self.candidates.last()
-    }
+  pub fn guess(&self) -> Option<&Word> {
+    self.candidates.first()
   }
 
   pub fn candidates(&self) -> &[Word] {
@@ -210,5 +206,70 @@ impl Guesser {
 
     self.candidates.retain(include);
     sort_by_frequency(&mut self.candidates);
+
+    if matches!(self.candidates.len(), 3..=26) {
+      let mut unique_letters = ArrayVec::<Letter, 26>::new();
+      for (i, a) in self.candidates.iter().enumerate() {
+        for (j, b) in self.candidates.iter().enumerate() {
+          if i == j { continue; }
+          let mut distinct = a.iter().copied().filter(|ch| !b.contains(ch));
+          if let Some(ch) = distinct.next() && distinct.next().is_none() {
+            if let Err(idx) = unique_letters.binary_search(&ch) {
+              unique_letters.insert(idx, ch);
+            }
+          }
+        }
+      }
+
+      if unique_letters.len() >= 3 {
+        if VERBOSE_MESSAGES {
+          println!("candidates:");
+          for candidate in &self.candidates {
+            println!(" {candidate}");
+          }
+          println!("unique letters: {unique_letters:?}");
+        }
+
+        let mut possible_tiebreakers = FIVE_LETTER_WORDS.iter()
+          .copied()
+          .map(|word|
+            (word, unique_letters.iter()
+              .filter(|ch| word.contains(ch))
+              .count())
+          )
+          .filter(|(_, n)| *n >= 3)
+          .take(127)
+          .collect::<ArrayVec<_, 127>>();
+
+        // prefer words with fewer letters we already know
+        possible_tiebreakers.sort_by_cached_key(|(w, _)|
+          self.excluded.iter().copied()
+            .chain(self.required.iter().copied().map(|(ch, _)| ch))
+            .chain(self.confirmed.iter().copied().filter_map(|ch| ch))
+            .filter(|ch| w.contains(ch))
+              .count()
+        );
+
+        // prefer words with more tiebreakers
+        possible_tiebreakers.sort_by_key(|(_, n)| usize::MAX - n);
+
+        // prefer words without repeated letters
+        possible_tiebreakers.sort_by_cached_key(|(w, _)| !w.is_unique());
+
+        if VERBOSE_MESSAGES {
+          println!("possible tiebreakers:");
+          for (word, n) in &possible_tiebreakers {
+            println!(" {word} ({n} distinct)");
+          }
+        }
+
+        if let Some((tiebreaker, n)) = possible_tiebreakers.first().copied() {
+          if VERBOSE_MESSAGES {
+            println!("tiebreaker ({n} distinguishing characters): {tiebreaker}");
+          }
+          self.candidates.insert(0, tiebreaker);
+        }
+      }
+    }
   }
 }

@@ -40,6 +40,16 @@ pub enum CharStatus {
   Confirmed,
 }
 
+impl std::fmt::Display for CharStatus {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      CharStatus::Excluded => "⬜️".fmt(f),
+      CharStatus::Required => "🟨".fmt(f),
+      CharStatus::Confirmed => "🟩".fmt(f),
+    }
+  }
+}
+
 pub fn no_repeated_letters(word: &[u8; 5]) -> bool {
   for i in 1..5 {
     if word[..i].contains(&word[i]) {
@@ -99,14 +109,19 @@ impl Guesser {
     }
   }
 
-  const fn confirmed_positions(&self) -> Positions {
-    Positions::from_bits(
-      ((self.confirmed[0].is_some() as u8) << 0) |
-      ((self.confirmed[1].is_some() as u8) << 1) |
-      ((self.confirmed[2].is_some() as u8) << 2) |
-      ((self.confirmed[3].is_some() as u8) << 3) |
-      ((self.confirmed[4].is_some() as u8) << 4)
-    ).unwrap()
+  fn confirmed_positions(&self) -> Positions {
+    Positions::from_iter(
+      self.confirmed.iter()
+        .enumerate()
+        .filter(|(_, ch)| ch.is_some())
+        .map(|(i, _)| Positions::from_index(i).unwrap())
+    )
+  }
+
+  fn confirm(&mut self, idx: usize, ch: u8) {
+    self.confirmed[idx] = Some(ch);
+    #[cfg(debug_assertions)]
+    println!("letter '{}' is confirmed at position {}", char::from(ch), idx + 1);
   }
 
   /// If only one possible space, treat as confirmed
@@ -117,8 +132,14 @@ impl Guesser {
     let possible_positions = p
       .union(self.confirmed_positions())
       .complement();
+    #[cfg(debug_assertions)]
+    println!("letter '{}' can only be placed in {possible_positions:?}", char::from(ch));
     if possible_positions.bits().count_ones() == 1 {
-      self.confirmed[possible_positions.into_index()] = Some(ch);
+      assert!(!possible_positions.is_empty());
+      let only_open = possible_positions.into_index();
+      #[cfg(debug_assertions)]
+      println!("letter '{}' can only be placed at position {}", char::from(ch), only_open + 1);
+      self.confirm(only_open, ch);
       _ = self.required.remove(idx);
       true
     } else {
@@ -132,6 +153,8 @@ impl Guesser {
         CharStatus::Excluded => {
           if let Err(pos) = self.excluded.binary_search(&ch) {
             self.excluded.insert(pos, ch);
+            #[cfg(debug_assertions)]
+            println!("letter '{}' is not in the word", char::from(ch));
           }
         }
 
@@ -141,15 +164,19 @@ impl Guesser {
             Ok(idx) => { self.required[idx].1.insert(pos); idx },
             Err(idx) => { self.required.insert(idx, (ch, pos)); idx },
           };
+          #[cfg(debug_assertions)]
+          println!("letter '{}' is required but cannot be in {:?}", char::from(ch), self.required[idx].1);
           _ = self.pidgeon(idx);
         }
 
         CharStatus::Confirmed => {
-          self.confirmed[i] = Some(ch);
+          self.confirm(i, ch);
         }
       }
     }
 
+    #[cfg(debug_assertions)]
+    println!("draining...");
     'outer: loop {
       for i in 0..self.required.len() {
         if self.pidgeon(i) {
@@ -158,6 +185,8 @@ impl Guesser {
       }
       break;
     }
+    #[cfg(debug_assertions)]
+    println!("feedback complete");
   }
 
   pub fn prune(&mut self) {

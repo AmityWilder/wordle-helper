@@ -1,0 +1,187 @@
+use arrayvec::ArrayVec;
+use bitflags::bitflags;
+use rand::prelude::*;
+use crate::dictionary::*;
+
+bitflags!{
+  #[derive(Debug, Clone, Copy)]
+  pub struct Positions: u8 {
+    const P1 = 1 << 0;
+    const P2 = 1 << 1;
+    const P3 = 1 << 2;
+    const P4 = 1 << 3;
+    const P5 = 1 << 4;
+  }
+}
+
+impl Positions {
+  pub const fn from_index(index: usize) -> Option<Self> {
+    Self::from_bits(1u8 << index)
+  }
+
+  pub const fn into_index(self) -> usize {
+    debug_assert!(self.bits().count_ones() == 1);
+    self.bits().trailing_zeros() as usize
+  }
+}
+
+const _: () = {
+  assert!(Positions::P1.into_index() == 0);
+  assert!(Positions::P2.into_index() == 1);
+  assert!(Positions::P3.into_index() == 2);
+  assert!(Positions::P4.into_index() == 3);
+  assert!(Positions::P5.into_index() == 4);
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CharStatus {
+  Excluded,
+  Required,
+  Confirmed,
+}
+
+pub fn no_repeated_letters(word: &[u8; 5]) -> bool {
+  for i in 1..5 {
+    if word[..i].contains(&word[i]) {
+      return false;
+    }
+  }
+  true
+}
+
+pub struct Guesser {
+  candidates: Vec<[u8; 5]>,
+  unique_candidates: Vec<[u8; 5]>,
+  /// Sorted alphabetically
+  excluded: ArrayVec<u8, {26 - 5}>,
+  /// Sorted alphabetically
+  required: ArrayVec<(u8, Positions), 5>,
+  confirmed: [Option<u8>; 5],
+}
+
+impl Guesser {
+  pub fn new() -> Self {
+    let mut candidates = Vec::new();
+    let mut unique_candidates = Vec::new();
+
+    for word in FIVE_LETTER_WORDS {
+      if no_repeated_letters(&word) {
+        &mut unique_candidates
+      } else {
+        &mut candidates
+      }.push(word);
+    }
+
+    Self {
+      candidates,
+      unique_candidates,
+      excluded: ArrayVec::new(),
+      required: ArrayVec::new(),
+      confirmed: [const { None }; 5],
+    }
+  }
+
+  pub fn suggestion<R: ?Sized + Rng>(&self, rng: &mut R) -> Option<&[u8; 5]> {
+    [&self.unique_candidates, &self.candidates]
+      .into_iter()
+      .find_map(|list| list.choose(rng))
+  }
+
+  pub fn candidates(&self) -> impl Iterator<Item = &[u8; 5]> {
+    self.unique_candidates.iter().chain(self.candidates.iter())
+  }
+
+  pub const fn confirmed_word(&self) -> Option<[u8; 5]> {
+    if let [Some(c1), Some(c2), Some(c3), Some(c4), Some(c5)] = self.confirmed {
+      Some([c1, c2, c3, c4, c5])
+    } else {
+      None
+    }
+  }
+
+  const fn confirmed_positions(&self) -> Positions {
+    Positions::from_bits(
+      ((self.confirmed[0].is_some() as u8) << 0) |
+      ((self.confirmed[1].is_some() as u8) << 1) |
+      ((self.confirmed[2].is_some() as u8) << 2) |
+      ((self.confirmed[3].is_some() as u8) << 3) |
+      ((self.confirmed[4].is_some() as u8) << 4)
+    ).unwrap()
+  }
+
+  /// If only one possible space, treat as confirmed
+  ///
+  /// Returns `true` if an unknown was confirmed
+  fn pidgeon(&mut self, idx: usize) -> bool {
+    let (ch, p) = self.required[idx];
+    let possible_positions = p
+      .union(self.confirmed_positions())
+      .complement();
+    if possible_positions.bits().count_ones() == 1 {
+      self.confirmed[possible_positions.into_index()] = Some(ch);
+      _ = self.required.remove(idx);
+      true
+    } else {
+      false
+    }
+  }
+
+  pub fn submit_feedback(&mut self, chars: [(u8, CharStatus); 5]) {
+    for (i, (ch, stat)) in chars.into_iter().enumerate() {
+      match stat {
+        CharStatus::Excluded => {
+          if let Err(pos) = self.excluded.binary_search(&ch) {
+            self.excluded.insert(pos, ch);
+          }
+        }
+
+        CharStatus::Required => {
+          let pos = Positions::from_index(i).unwrap();
+          let idx = match self.required.binary_search_by_key(&ch, |(r, _)| *r) {
+            Ok(idx) => { self.required[idx].1.insert(pos); idx },
+            Err(idx) => { self.required.insert(idx, (ch, pos)); idx },
+          };
+          _ = self.pidgeon(idx);
+        }
+
+        CharStatus::Confirmed => {
+          self.confirmed[i] = Some(ch);
+        }
+      }
+    }
+
+    'outer: loop {
+      for i in 0..self.required.len() {
+        if self.pidgeon(i) {
+          continue 'outer;
+        }
+      }
+      break;
+    }
+  }
+
+  pub fn prune(&mut self) {
+    let include = |word: &[u8; 5]| -> bool {
+      // Must contain all confirmed
+      word.iter().copied().zip(self.confirmed.iter().copied())
+        .all(|(a, b)| b.is_none_or(|b| a == b))
+      &&
+      // Must contain none excluded
+      !word.iter().any(|ch| self.excluded.binary_search(ch).is_ok())
+      &&
+      // Must contain all required
+      self.required.iter().copied().all(|(r, p)| {
+        word.contains(&r) &&
+        word.iter().copied()
+          .enumerate()
+          // but only in an open space
+          .filter(|&(i, ch)| self.confirmed[i].is_none() && ch == r)
+          // where that character has not been tried yet
+          .all(|(i, _)| !p.contains(Positions::from_index(i).unwrap()))
+      })
+    };
+
+    self.candidates.retain(include);
+    self.unique_candidates.retain(include);
+  }
+}

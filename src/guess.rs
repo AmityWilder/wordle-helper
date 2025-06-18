@@ -1,6 +1,5 @@
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
-use rand::prelude::*;
 use crate::dictionary::*;
 
 bitflags!{
@@ -61,7 +60,6 @@ pub fn no_repeated_letters(word: &[u8; 5]) -> bool {
 
 pub struct Guesser {
   candidates: Vec<[u8; 5]>,
-  unique_candidates: Vec<[u8; 5]>,
   /// Sorted alphabetically
   excluded: ArrayVec<u8, {26 - 5}>,
   /// Sorted alphabetically
@@ -71,34 +69,44 @@ pub struct Guesser {
 
 impl Guesser {
   pub fn new() -> Self {
-    let mut candidates = Vec::new();
-    let mut unique_candidates = Vec::new();
-
-    for word in FIVE_LETTER_WORDS {
-      if no_repeated_letters(&word) {
-        &mut unique_candidates
-      } else {
-        &mut candidates
-      }.push(word);
-    }
-
+    let mut candidates = FIVE_LETTER_WORDS.to_vec();
+    candidates.sort_by_key(|word| {
+      let mut score = 0;
+      score += word.iter()
+        .enumerate()
+        .map(|item| match item {
+          (_, b'A') => 2,
+          (_, b'E') => 2,
+          (_, b'I') => 1,
+          (_, b'O') => 1,
+          (_, b'U') => 1,
+          (_, b'Q') => -1,
+          (5, b'Y') => 1,
+          (_, b'Y') => -1,
+          (_, b'W') => -1,
+          (_, b'Z') => -2,
+          _ => 0,
+        })
+        .sum::<i8>();
+      if no_repeated_letters(word) {
+        score *= 3;
+      }
+      -score
+    });
     Self {
       candidates,
-      unique_candidates,
       excluded: ArrayVec::new(),
       required: ArrayVec::new(),
       confirmed: [const { None }; 5],
     }
   }
 
-  pub fn suggestion<R: ?Sized + Rng>(&self, rng: &mut R) -> Option<&[u8; 5]> {
-    [&self.unique_candidates, &self.candidates]
-      .into_iter()
-      .find_map(|list| list.choose(rng))
+  pub fn suggestion(&self) -> Option<&[u8; 5]> {
+    self.candidates.first()
   }
 
-  pub fn candidates(&self) -> impl Iterator<Item = &[u8; 5]> {
-    self.unique_candidates.iter().chain(self.candidates.iter())
+  pub fn candidates(&self) -> &[[u8; 5]] {
+    &self.candidates
   }
 
   pub const fn confirmed_word(&self) -> Option<[u8; 5]> {
@@ -132,9 +140,11 @@ impl Guesser {
     let possible_positions = p
       .union(self.confirmed_positions())
       .complement();
+    let num_possible_positions = possible_positions.bits().count_ones();
+    assert_ne!(num_possible_positions, 0, "letter '{}' has no possible placement", char::from(ch));
     #[cfg(debug_assertions)]
     println!("letter '{}' can only be placed in {possible_positions:?}", char::from(ch));
-    if possible_positions.bits().count_ones() == 1 {
+    if num_possible_positions == 1 {
       assert!(!possible_positions.is_empty());
       let only_open = possible_positions.into_index();
       #[cfg(debug_assertions)]
@@ -171,6 +181,11 @@ impl Guesser {
 
         CharStatus::Confirmed => {
           self.confirm(i, ch);
+          if let Ok(i) = self.required.binary_search_by_key(&ch, |(ch, _)| *ch) {
+            #[cfg(debug_assertions)]
+            println!("letter '{}' no longer unknown", char::from(ch));
+            _ = self.required.remove(i);
+          }
         }
       }
     }
@@ -211,6 +226,5 @@ impl Guesser {
     };
 
     self.candidates.retain(include);
-    self.unique_candidates.retain(include);
   }
 }

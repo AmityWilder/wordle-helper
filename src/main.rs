@@ -5,14 +5,13 @@ use arrayvec::ArrayVec;
 use guess::*;
 
 fn main() {
-  let mut rng = rand::rng();
   let mut buf = String::with_capacity(12);
   let mut guesser = Guesser::new();
   let mut attempts = ArrayVec::<_, 6>::new();
 
   for turn in 1..=6 {
     println!("turn {turn} ({} remaining):", 6 - turn);
-    if let Some(s) = guesser.suggestion(&mut rng) {
+    if let Some(s) = guesser.suggestion() {
       println!("suggestion: {}", unsafe { str::from_utf8_unchecked(s) });
     } else {
       println!("no such word exists in my dictionary");
@@ -36,14 +35,14 @@ fn main() {
       },
     ));
     attempts.push(feedback.map(|(_, stat)| stat));
-    for row in &attempts {
-      for col in row {
-        print!("{col}");
-      }
-      println!();
-    }
     guesser.submit_feedback(feedback);
     if let Some(word) = guesser.confirmed_word() {
+      for row in &attempts {
+        for col in row {
+          print!("{col}");
+        }
+        println!();
+      }
       println!("success! winning word: {}", unsafe { str::from_utf8_unchecked(&word) });
       return;
     }
@@ -54,5 +53,12 @@ fn main() {
       print!("{} ", unsafe { str::from_utf8_unchecked(word) });
     }
     println!();
+    for row in &attempts {
+      for col in row {
+        print!("{col}");
+      }
+      println!();
+    }
   }
+  println!("game over");
 }

@@ -107,6 +107,15 @@ impl Word {
   pub const fn as_str(&self) -> &str {
     unsafe { str::from_utf8_unchecked(self.as_bytes()) }
   }
+
+  /// Every letter in the word is unique
+  pub const fn is_unique(&self) -> bool {
+    let [c0, c1, c2, c3, c4] = self.to_bytes();
+    c1 != c0 &&
+    c2 != c1 && c2 != c0 &&
+    c3 != c2 && c3 != c1 && c3 != c0 &&
+    c4 != c3 && c4 != c2 && c4 != c1 && c4 != c0
+  }
 }
 
 impl std::fmt::Display for Word {

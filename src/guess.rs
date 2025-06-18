@@ -76,7 +76,7 @@ impl Guesser {
   }
 
   pub fn guess(&self, turn: u32) -> Option<&Word> {
-    if turn <= 5 {
+    if turn <= 6 {
       self.candidates.first()
     } else {
       self.candidates.last()
@@ -209,5 +209,6 @@ impl Guesser {
     };
 
     self.candidates.retain(include);
+    sort_by_frequency(&mut self.candidates);
   }
 }

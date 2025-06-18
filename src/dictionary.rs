@@ -334,47 +334,32 @@ const UNSORTED_FIVE_LETTER_WORDS: [Word; 2309] = unsafe { std::mem::transmute([
   *b"YIELD", *b"YOUNG", *b"YOUTH", *b"ZEBRA", *b"ZESTY", *b"ZONAL",
 ]) };
 
-pub fn no_repeated_letters(word: &Word) -> bool {
-  for i in 1..5 {
-    if word[..i].contains(&word[i]) {
-      return false;
-    }
-  }
-  true
-}
-
-pub static FIVE_LETTER_WORDS: LazyLock<[Word; 2309]> = LazyLock::new(|| {
-  const COEF: f32 = 1.0/UNSORTED_FIVE_LETTER_WORDS.len() as f32;
-  let mut words = UNSORTED_FIVE_LETTER_WORDS;
-  let mut freq_analysis = [[0.0; 26]; 5];
-  for word in words {
+pub fn sort_by_frequency(words: &mut [Word]) {
+  let mut freq_analysis = [[0; 26]; 5];
+  for word in &*words {
     for (ch, freq) in word.into_iter().zip(freq_analysis.iter_mut()) {
-      freq[ch.index()] += COEF;
+      freq[ch.index()] += 1;
     }
   }
-  // #[cfg(debug_assertions)]
-  // println!("frequency analysis: {freq_analysis:#?}");
-  assert!(freq_analysis.iter().all(|ch| (1.0 - ch.iter().sum::<f32>()).abs() <= 0.001), "probability of each letter should sum to 1");
+
+  // the most unimaginably average word that somehow has every
+  // letter appear, in their exact positions, in *every* word.
+  let max_word_score = words.len() as u32 * 5;
+
   words.sort_by_cached_key(|word| {
-    let mut score = word.iter()
+    max_word_score - word.iter()
       .copied()
       .enumerate()
       .map(|(i, ch)| freq_analysis[i][ch.index()])
-      .sum::<f32>();
-
-    if no_repeated_letters(word) {
-      score *= 5.0;
-    }
-
-    500 - (score * 100.0).round() as u64
+      .sum::<u32>()
   });
-  // #[cfg(debug_assertions)] {
-  //   print!("words:");
-  //   for (n, word) in (0..7).cycle().zip(words.iter()) {
-  //     if n == 0 { println!(); }
-  //     print!(" {}", unsafe { str::from_utf8_unchecked(word) });
-  //   }
-  //   println!();
-  // }
+
+  // partition unique words to the front
+  words.sort_by_cached_key(|word| !word.is_unique());
+}
+
+pub static FIVE_LETTER_WORDS: LazyLock<[Word; 2309]> = LazyLock::new(|| {
+  let mut words = UNSORTED_FIVE_LETTER_WORDS;
+  sort_by_frequency(&mut words);
   words
 });

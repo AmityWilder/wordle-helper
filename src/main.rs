@@ -2,10 +2,14 @@ use std::io::stdin;
 use arrayvec::ArrayVec;
 use guess::*;
 
+use crate::word::Letter;
+
 pub const VERBOSE_MESSAGES: bool = false;
 
+mod word;
 mod dictionary;
 mod guess;
+#[cfg(test)]
 mod play;
 
 pub struct Attempts(ArrayVec::<[CharStatus; 5], 6>);
@@ -41,8 +45,8 @@ fn main() {
 
   for turn in 1..=6 {
     println!("turn {turn} ({} remaining):", 6 - turn);
-    if let Some(s) = guesser.guess() {
-      println!("suggestion: {}", unsafe { str::from_utf8_unchecked(s) });
+    if let Some(s) = guesser.guess(turn) {
+      println!("suggestion: {s}");
     } else {
       println!("no such word exists in my dictionary");
       return;
@@ -56,7 +60,8 @@ fn main() {
     assert!(buf.len() == 10);
     let bytes = buf.as_bytes();
     let feedback = std::array::from_fn(|i| (
-      bytes[i].to_ascii_uppercase(),
+      Letter::from_u8(bytes[i].to_ascii_uppercase())
+        .expect("unknown format"),
       match bytes[i + 5] {
         b'+' => CharStatus::Confirmed,
         b'?' => CharStatus::Required,
@@ -68,14 +73,14 @@ fn main() {
     guesser.analyze(feedback);
     if let Some(word) = guesser.confirmed_word() {
       println!("{attempts}");
-      println!("success! winning word: {}", unsafe { str::from_utf8_unchecked(&word) });
+      println!("success! winning word: {word}");
       return;
     }
     guesser.prune();
     print!("candidates:");
     for (n, word) in (0..7).cycle().zip(guesser.candidates()) {
       if n == 0 { println!(); }
-      print!("{} ", unsafe { str::from_utf8_unchecked(word) });
+      print!("{word} ");
     }
     println!();
     println!("{attempts}");
@@ -100,16 +105,13 @@ mod test {
       let mut guesses = Vec::new();
       let mut attempts = Attempts::new();
       for turn in 1..=6 {
-        let guess = guesser.guess().expect("should always have a suggestion");
+        let guess = guesser.guess(turn).expect("should always have a suggestion");
         guesses.push((*guess, guesser.candidates().len()));
         let stats = game.check(guess);
         attempts.push(stats);
         guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
         if let Some(winner) = guesser.confirmed_word() {
-          assert_eq!(
-            unsafe { str::from_utf8_unchecked(&winner) },
-            unsafe { str::from_utf8_unchecked(word) },
-          );
+          assert_eq!(&winner, word);
           println!("won on turn {turn}");
           final_boards.push((round, word, attempts, guesses));
           candidates_buf = Some(guesser.extract_resources());
@@ -123,9 +125,9 @@ mod test {
       candidates_buf = Some(guesser.extract_resources());
     }
     for (round, word, board, guesses) in final_boards.into_iter() {
-      println!("round {round}: {}\n{board}", unsafe { str::from_utf8_unchecked(word) });
+      println!("round {round}: {word}\n{board}");
       for (guess, candidate_count) in guesses {
-        println!("{} [{candidate_count} candidates]", unsafe { str::from_utf8_unchecked(&guess) });
+        println!("{guess} [{candidate_count} candidates]");
       }
       println!();
     }
@@ -138,8 +140,8 @@ mod test {
     'rounds: for word in FIVE_LETTER_WORDS.iter() {
       let game = Player::new(*word);
       let mut guesser = Guesser::new(candidates_buf.take().unwrap());
-      for i in 0u32..6 {
-        let guess = guesser.guess().unwrap();
+      for i in 1..=6 {
+        let guess = guesser.guess(i).unwrap();
         let stats = game.check(guess);
         guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
         if guesser.confirmed_word().is_some() {
@@ -194,17 +196,18 @@ mod test {
       let color = ['🟪', '🟦', '🟩', '🟨', '🟧', '🟥', '⬜'];
       let mut ranges = [0; 7];
       for turns in 0..6 {
-        let n = slice.partition_point(|&t| t == turns);
+        let n = slice.partition_point(|&t| t == turns + 1);
         ranges[turns as usize] = n;
         slice = &slice[n..];
       }
       ranges[6] = lost;
       let most = ranges.iter().copied().max().unwrap();
+      println!("turns-to-win histogram:");
       for (turns, n) in ranges.iter().copied().enumerate() {
         if turns == 6 {
           print!("_");
         } else {
-          print!("{turns}");
+          print!("{}", turns + 1);
         }
         print!(": {n:>5} ");
         let col = color[turns as usize];

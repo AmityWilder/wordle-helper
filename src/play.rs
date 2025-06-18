@@ -1,17 +1,17 @@
-use crate::guess::CharStatus;
+use crate::{guess::CharStatus, word::Word};
 
 pub struct Player {
-  word: [u8; 5],
+  word: Word,
 }
 
 impl Player {
-  pub const fn new(word: [u8; 5]) -> Self {
+  pub const fn new(word: Word) -> Self {
     Self {
       word,
     }
   }
 
-  pub fn check(&self, guess: &[u8; 5]) -> [CharStatus; 5] {
+  pub fn check(&self, guess: &Word) -> [CharStatus; 5] {
     std::array::from_fn(|i| {
       let ch = guess[i];
       if self.word.contains(&ch) {

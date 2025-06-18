@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
-use crate::{dictionary::*, VERBOSE_MESSAGES};
+use crate::{dictionary::*, word::{Letter, Word}, VERBOSE_MESSAGES};
 
 bitflags!{
   #[derive(Debug, Clone, Copy)]
@@ -50,16 +50,16 @@ impl std::fmt::Display for CharStatus {
 }
 
 pub struct Guesser {
-  candidates: Vec<[u8; 5]>,
+  candidates: Vec<Word>,
   /// Sorted alphabetically
-  excluded: ArrayVec<u8, {26 - 5}>,
+  excluded: ArrayVec<Letter, {26 - 5}>,
   /// Sorted alphabetically
-  required: ArrayVec<(u8, Positions), 5>,
-  confirmed: [Option<u8>; 5],
+  required: ArrayVec<(Letter, Positions), 5>,
+  confirmed: [Option<Letter>; 5],
 }
 
 impl Guesser {
-  pub fn new(mut candidates_buf: Vec<[u8; 5]>) -> Self {
+  pub fn new(mut candidates_buf: Vec<Word>) -> Self {
     candidates_buf.clear();
     candidates_buf.extend_from_slice(FIVE_LETTER_WORDS.as_slice());
     Self {
@@ -71,30 +71,34 @@ impl Guesser {
   }
 
   #[cfg(test)]
-  pub fn extract_resources(self) -> Vec<[u8; 5]> {
+  pub fn extract_resources(self) -> Vec<Word> {
     self.candidates
   }
 
-  pub fn guess(&self) -> Option<&[u8; 5]> {
-    self.candidates.first()
+  pub fn guess(&self, turn: u32) -> Option<&Word> {
+    if turn <= 5 {
+      self.candidates.first()
+    } else {
+      self.candidates.last()
+    }
   }
 
-  pub fn candidates(&self) -> &[[u8; 5]] {
+  pub fn candidates(&self) -> &[Word] {
     &self.candidates
   }
 
-  pub const fn confirmed_word(&self) -> Option<[u8; 5]> {
+  pub const fn confirmed_word(&self) -> Option<Word> {
     if let [Some(c1), Some(c2), Some(c3), Some(c4), Some(c5)] = self.confirmed {
-      Some([c1, c2, c3, c4, c5])
+      Some(Word([c1, c2, c3, c4, c5]))
     } else {
       None
     }
   }
 
-  fn confirm(&mut self, idx: usize, ch: u8) {
+  fn confirm(&mut self, idx: usize, ch: Letter) {
     self.confirmed[idx] = Some(ch);
     if VERBOSE_MESSAGES {
-      println!("letter '{}' is confirmed at position {}", char::from(ch), idx + 1);
+      println!("letter '{ch}' is confirmed at position {}", idx + 1);
     }
   }
 
@@ -113,15 +117,15 @@ impl Guesser {
       .union(confirmed_positions)
       .complement();
     let num_possible_positions = possible_positions.bits().count_ones();
-    assert_ne!(num_possible_positions, 0, "letter '{}' has no possible placement", char::from(ch));
+    assert_ne!(num_possible_positions, 0, "letter '{ch}' has no possible placement");
     if VERBOSE_MESSAGES {
-      println!("letter '{}' can only be placed in {possible_positions:?}", char::from(ch));
+      println!("letter '{ch}' can only be placed in {possible_positions:?}");
     }
     if num_possible_positions == 1 {
       assert!(!possible_positions.is_empty());
       let only_open = possible_positions.into_index();
       if VERBOSE_MESSAGES {
-        println!("letter '{}' can only be placed at position {}", char::from(ch), only_open + 1);
+        println!("letter '{ch}' can only be placed at position {}", only_open + 1);
       }
       self.confirm(only_open, ch);
       _ = self.required.remove(idx);
@@ -131,14 +135,14 @@ impl Guesser {
     }
   }
 
-  pub fn analyze(&mut self, chars: [(u8, CharStatus); 5]) {
+  pub fn analyze(&mut self, chars: [(Letter, CharStatus); 5]) {
     for (i, (ch, stat)) in chars.into_iter().enumerate() {
       match stat {
         CharStatus::Excluded => {
           if let Err(pos) = self.excluded.binary_search(&ch) {
             self.excluded.insert(pos, ch);
             if VERBOSE_MESSAGES {
-              println!("letter '{}' is not in the word", char::from(ch));
+              println!("letter '{ch}' is not in the word");
             }
           }
         }
@@ -150,7 +154,7 @@ impl Guesser {
             Err(idx) => { self.required.insert(idx, (ch, pos)); idx },
           };
           if VERBOSE_MESSAGES {
-            println!("letter '{}' is required but cannot be in {:?}", char::from(ch), self.required[idx].1);
+            println!("letter '{ch}' is required but cannot be in {:?}", self.required[idx].1);
           }
           _ = self.pidgeon(idx);
         }
@@ -159,7 +163,7 @@ impl Guesser {
           self.confirm(i, ch);
           if let Ok(i) = self.required.binary_search_by_key(&ch, |(ch, _)| *ch) {
             if VERBOSE_MESSAGES {
-              println!("letter '{}' no longer unknown", char::from(ch));
+              println!("letter '{ch}' no longer unknown");
             }
             _ = self.required.remove(i);
           }
@@ -184,7 +188,7 @@ impl Guesser {
   }
 
   pub fn prune(&mut self) {
-    let include = |word: &[u8; 5]| -> bool {
+    let include = |word: &Word| -> bool {
       // Must contain all confirmed
       word.iter().copied().zip(self.confirmed.iter().copied())
         .all(|(a, b)| b.is_none_or(|b| a == b))

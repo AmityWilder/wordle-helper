@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
-use crate::dictionary::*;
+use crate::{dictionary::*, VERBOSE_MESSAGES};
 
 bitflags!{
   #[derive(Debug, Clone, Copy)]
@@ -101,7 +101,7 @@ impl Guesser {
     }
   }
 
-  pub fn suggestion(&self) -> Option<&[u8; 5]> {
+  pub fn guess(&self) -> Option<&[u8; 5]> {
     self.candidates.first()
   }
 
@@ -117,19 +117,11 @@ impl Guesser {
     }
   }
 
-  fn confirmed_positions(&self) -> Positions {
-    Positions::from_iter(
-      self.confirmed.iter()
-        .enumerate()
-        .filter(|(_, ch)| ch.is_some())
-        .map(|(i, _)| Positions::from_index(i).unwrap())
-    )
-  }
-
   fn confirm(&mut self, idx: usize, ch: u8) {
     self.confirmed[idx] = Some(ch);
-    #[cfg(debug_assertions)]
-    println!("letter '{}' is confirmed at position {}", char::from(ch), idx + 1);
+    if VERBOSE_MESSAGES {
+      println!("letter '{}' is confirmed at position {}", char::from(ch), idx + 1);
+    }
   }
 
   /// If only one possible space, treat as confirmed
@@ -137,18 +129,26 @@ impl Guesser {
   /// Returns `true` if an unknown was confirmed
   fn pidgeon(&mut self, idx: usize) -> bool {
     let (ch, p) = self.required[idx];
+    let confirmed_positions = Positions::from_iter(
+      self.confirmed.iter()
+        .enumerate()
+        .filter(|(_, c)| c.is_some_and(|c| c != ch))
+        .map(|(i, _)| Positions::from_index(i).unwrap())
+    );
     let possible_positions = p
-      .union(self.confirmed_positions())
+      .union(confirmed_positions)
       .complement();
     let num_possible_positions = possible_positions.bits().count_ones();
     assert_ne!(num_possible_positions, 0, "letter '{}' has no possible placement", char::from(ch));
-    #[cfg(debug_assertions)]
-    println!("letter '{}' can only be placed in {possible_positions:?}", char::from(ch));
+    if VERBOSE_MESSAGES {
+      println!("letter '{}' can only be placed in {possible_positions:?}", char::from(ch));
+    }
     if num_possible_positions == 1 {
       assert!(!possible_positions.is_empty());
       let only_open = possible_positions.into_index();
-      #[cfg(debug_assertions)]
-      println!("letter '{}' can only be placed at position {}", char::from(ch), only_open + 1);
+      if VERBOSE_MESSAGES {
+        println!("letter '{}' can only be placed at position {}", char::from(ch), only_open + 1);
+      }
       self.confirm(only_open, ch);
       _ = self.required.remove(idx);
       true
@@ -157,14 +157,15 @@ impl Guesser {
     }
   }
 
-  pub fn submit_feedback(&mut self, chars: [(u8, CharStatus); 5]) {
+  pub fn analyze(&mut self, chars: [(u8, CharStatus); 5]) {
     for (i, (ch, stat)) in chars.into_iter().enumerate() {
       match stat {
         CharStatus::Excluded => {
           if let Err(pos) = self.excluded.binary_search(&ch) {
             self.excluded.insert(pos, ch);
-            #[cfg(debug_assertions)]
-            println!("letter '{}' is not in the word", char::from(ch));
+            if VERBOSE_MESSAGES {
+              println!("letter '{}' is not in the word", char::from(ch));
+            }
           }
         }
 
@@ -174,24 +175,27 @@ impl Guesser {
             Ok(idx) => { self.required[idx].1.insert(pos); idx },
             Err(idx) => { self.required.insert(idx, (ch, pos)); idx },
           };
-          #[cfg(debug_assertions)]
-          println!("letter '{}' is required but cannot be in {:?}", char::from(ch), self.required[idx].1);
+          if VERBOSE_MESSAGES {
+            println!("letter '{}' is required but cannot be in {:?}", char::from(ch), self.required[idx].1);
+          }
           _ = self.pidgeon(idx);
         }
 
         CharStatus::Confirmed => {
           self.confirm(i, ch);
           if let Ok(i) = self.required.binary_search_by_key(&ch, |(ch, _)| *ch) {
-            #[cfg(debug_assertions)]
-            println!("letter '{}' no longer unknown", char::from(ch));
+            if VERBOSE_MESSAGES {
+              println!("letter '{}' no longer unknown", char::from(ch));
+            }
             _ = self.required.remove(i);
           }
         }
       }
     }
 
-    #[cfg(debug_assertions)]
-    println!("draining...");
+    if VERBOSE_MESSAGES {
+      println!("draining...");
+    }
     'outer: loop {
       for i in 0..self.required.len() {
         if self.pidgeon(i) {
@@ -200,8 +204,9 @@ impl Guesser {
       }
       break;
     }
-    #[cfg(debug_assertions)]
-    println!("feedback complete");
+    if VERBOSE_MESSAGES {
+      println!("feedback complete");
+    }
   }
 
   pub fn prune(&mut self) {

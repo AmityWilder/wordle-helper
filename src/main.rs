@@ -131,8 +131,7 @@ mod test {
   #[test]
   fn test_statistics() {
     let mut turns = Vec::new();
-    let mut rng = rng();
-    'rounds: for word in FIVE_LETTER_WORDS.choose_multiple(&mut rng, 500) {
+    'rounds: for word in FIVE_LETTER_WORDS.iter() {
       let game = Player::new(*word);
       let mut guesser = Guesser::new();
       for i in 0u32..6 {
@@ -186,12 +185,28 @@ mod test {
       ");
 
       let mut slice = &successes[..];
+      let color = ['🟪', '🟦', '🟩', '🟨', '🟧', '🟥', '⬜'];
+      let mut ranges = [0; 7];
       for turns in 0..6 {
         let n = slice.partition_point(|&t| t == turns);
+        ranges[turns as usize] = n;
         slice = &slice[n..];
-        println!("{turns}: {n:>5}");
       }
-      println!("_: {lost:>5}");
+      ranges[6] = lost;
+      let most = ranges.iter().copied().max().unwrap();
+      for (turns, n) in ranges.iter().copied().enumerate() {
+        if turns == 6 {
+          print!("_");
+        } else {
+          print!("{turns}");
+        }
+        print!(": {n:>5} ");
+        let col = color[turns as usize];
+        for _ in 0..((n as f64/most as f64)*20.0).floor() as usize {
+          print!("{col}");
+        }
+        println!();
+      }
     }
   }
 }

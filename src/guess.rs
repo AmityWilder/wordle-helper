@@ -49,15 +49,6 @@ impl std::fmt::Display for CharStatus {
   }
 }
 
-pub fn no_repeated_letters(word: &[u8; 5]) -> bool {
-  for i in 1..5 {
-    if word[..i].contains(&word[i]) {
-      return false;
-    }
-  }
-  true
-}
-
 pub struct Guesser {
   candidates: Vec<[u8; 5]>,
   /// Sorted alphabetically
@@ -67,81 +58,21 @@ pub struct Guesser {
   confirmed: [Option<u8>; 5],
 }
 
-fn score(word: &[u8; 5]) -> f32 {
-  let mut score = word.iter()
-    .enumerate()
-    .map(|item| match item {
-      (0, b'A') => 5.7,
-      (_, b'A') => 7.8,
-      (0, b'B') => 6.0,
-      (_, b'B') => 2.0,
-      (0, b'C') => 9.4,
-      (_, b'C') => 4.0,
-      (0, b'D') => 6.1,
-      (_, b'D') => 3.8,
-      (0, b'E') => 3.9,
-      (_, b'E') => 11.0,
-      (0, b'F') => 4.1,
-      (_, b'F') => 1.4,
-      (0, b'G') => 3.3,
-      (_, b'G') => 3.0,
-      (0, b'H') => 3.7,
-      (_, b'H') => 2.3,
-      (0, b'I') => 3.9,
-      (_, b'I') => 8.6,
-      (0, b'J') => 1.1,
-      (_, b'J') => 0.21,
-      (0, b'K') => 1.0,
-      (_, b'K') => 0.97,
-      (0, b'L') => 3.1,
-      (_, b'L') => 5.3,
-      (0, b'M') => 5.6,
-      (_, b'M') => 2.7,
-      (0, b'N') => 2.2,
-      (_, b'N') => 7.2,
-      (0, b'O') => 2.5,
-      (_, b'O') => 6.1,
-      (0, b'P') => 7.7,
-      (_, b'P') => 2.8,
-      (0, b'Q') => 0.49,
-      (_, b'Q') => 0.19,
-      (0, b'R') => 6.0,
-      (_, b'R') => 7.3,
-      (0, b'S') => 11.0,
-      (_, b'S') => 8.7,
-      (0, b'T') => 5.0,
-      (_, b'T') => 6.7,
-      (0, b'U') => 2.9,
-      (_, b'U') => 3.3,
-      (0, b'V') => 1.5,
-      (_, b'V') => 1.0,
-      (0, b'W') => 2.7,
-      (_, b'W') => 0.91,
-      (0, b'X') => 0.05,
-      (_, b'X') => 0.27,
-      (0, b'Y') => 0.36,
-      (_, b'Y') => 1.6,
-      (0, b'Z') => 0.24,
-      (_, b'Z') => 0.44,
-      _ => unreachable!(),
-    })
-    .sum::<f32>();
-  if no_repeated_letters(word) {
-    score *= 5.0;
-  }
-  score
-}
-
 impl Guesser {
-  pub fn new() -> Self {
-    let mut candidates = FIVE_LETTER_WORDS.to_vec();
-    candidates.sort_by(|a, b| score(b).total_cmp(&score(a)));
+  pub fn new(mut candidates_buf: Vec<[u8; 5]>) -> Self {
+    candidates_buf.clear();
+    candidates_buf.extend_from_slice(FIVE_LETTER_WORDS.as_slice());
     Self {
-      candidates,
+      candidates: candidates_buf,
       excluded: ArrayVec::new(),
       required: ArrayVec::new(),
       confirmed: [const { None }; 5],
     }
+  }
+
+  #[cfg(test)]
+  pub fn extract_resources(self) -> Vec<[u8; 5]> {
+    self.candidates
   }
 
   pub fn guess(&self) -> Option<&[u8; 5]> {

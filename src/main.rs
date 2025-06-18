@@ -36,7 +36,7 @@ impl std::fmt::Display for Attempts {
 
 fn main() {
   let mut buf = String::with_capacity(12);
-  let mut guesser = Guesser::new();
+  let mut guesser = Guesser::new(Vec::new());
   let mut attempts = Attempts::new();
 
   for turn in 1..=6 {
@@ -90,12 +90,13 @@ mod test {
 
   #[test]
   fn test() {
+    let mut candidates_buf = Some(Vec::new());
     let mut rng = rng();
     let mut final_boards = Vec::new();
     'rounds: for (round, word) in FIVE_LETTER_WORDS.choose_multiple(&mut rng, 10).enumerate() {
       println!("\nround {round}:");
       let game = Player::new(*word);
-      let mut guesser = Guesser::new();
+      let mut guesser = Guesser::new(candidates_buf.take().expect("should always have buffer at round start"));
       let mut guesses = Vec::new();
       let mut attempts = Attempts::new();
       for turn in 1..=6 {
@@ -111,6 +112,7 @@ mod test {
           );
           println!("won on turn {turn}");
           final_boards.push((round, word, attempts, guesses));
+          candidates_buf = Some(guesser.extract_resources());
           continue 'rounds;
         }
         guesser.prune();
@@ -118,6 +120,7 @@ mod test {
       }
       println!("failed to identify word in alloted time :(");
       final_boards.push((round, word, attempts, guesses));
+      candidates_buf = Some(guesser.extract_resources());
     }
     for (round, word, board, guesses) in final_boards.into_iter() {
       println!("round {round}: {}\n{board}", unsafe { str::from_utf8_unchecked(word) });
@@ -130,21 +133,24 @@ mod test {
 
   #[test]
   fn test_statistics() {
-    let mut turns = Vec::new();
+    let mut candidates_buf = Some(Vec::new());
+    let mut turns = Vec::with_capacity(FIVE_LETTER_WORDS.len());
     'rounds: for word in FIVE_LETTER_WORDS.iter() {
       let game = Player::new(*word);
-      let mut guesser = Guesser::new();
+      let mut guesser = Guesser::new(candidates_buf.take().unwrap());
       for i in 0u32..6 {
         let guess = guesser.guess().unwrap();
         let stats = game.check(guess);
         guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
         if guesser.confirmed_word().is_some() {
           turns.push(Some(i));
+          candidates_buf = Some(guesser.extract_resources());
           continue 'rounds;
         }
         guesser.prune();
       }
       turns.push(None);
+      candidates_buf = Some(guesser.extract_resources());
     }
 
     let mut successes: Vec<_> = turns.iter()

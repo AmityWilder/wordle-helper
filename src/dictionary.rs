@@ -1,4 +1,6 @@
-pub const FIVE_LETTER_WORDS: [[u8; 5]; 2309] = [
+use std::sync::LazyLock;
+
+const UNSORTED_FIVE_LETTER_WORDS: [[u8; 5]; 2309] = [
   *b"ABACK", *b"ABASE", *b"ABATE", *b"ABBEY", *b"ABBOT", *b"ABHOR", *b"ABIDE",
   *b"ABLED", *b"ABODE", *b"ABORT", *b"ABOUT", *b"ABOVE", *b"ABUSE", *b"ABYSS",
   *b"ACORN", *b"ACRID", *b"ACTOR", *b"ACUTE", *b"ADAGE", *b"ADAPT", *b"ADEPT",
@@ -330,3 +332,85 @@ pub const FIVE_LETTER_WORDS: [[u8; 5]; 2309] = [
   *b"WRONG", *b"WROTE", *b"WRUNG", *b"WRYLY", *b"YACHT", *b"YEARN", *b"YEAST",
   *b"YIELD", *b"YOUNG", *b"YOUTH", *b"ZEBRA", *b"ZESTY", *b"ZONAL",
 ];
+
+pub fn no_repeated_letters(word: &[u8; 5]) -> bool {
+  for i in 1..5 {
+    if word[..i].contains(&word[i]) {
+      return false;
+    }
+  }
+  true
+}
+
+fn score(word: &[u8; 5]) -> f32 {
+  let mut score = word.iter()
+    .enumerate()
+    .map(|item| match item {
+      (0, b'A') => 5.7,
+      (_, b'A') => 7.8,
+      (0, b'B') => 6.0,
+      (_, b'B') => 2.0,
+      (0, b'C') => 9.4,
+      (_, b'C') => 4.0,
+      (0, b'D') => 6.1,
+      (_, b'D') => 3.8,
+      (0, b'E') => 3.9,
+      (_, b'E') => 11.0,
+      (0, b'F') => 4.1,
+      (_, b'F') => 1.4,
+      (0, b'G') => 3.3,
+      (_, b'G') => 3.0,
+      (0, b'H') => 3.7,
+      (_, b'H') => 2.3,
+      (0, b'I') => 3.9,
+      (_, b'I') => 8.6,
+      (0, b'J') => 1.1,
+      (_, b'J') => 0.21,
+      (0, b'K') => 1.0,
+      (_, b'K') => 0.97,
+      (0, b'L') => 3.1,
+      (_, b'L') => 5.3,
+      (0, b'M') => 5.6,
+      (_, b'M') => 2.7,
+      (0, b'N') => 2.2,
+      (_, b'N') => 7.2,
+      (0, b'O') => 2.5,
+      (_, b'O') => 6.1,
+      (0, b'P') => 7.7,
+      (_, b'P') => 2.8,
+      (0, b'Q') => 0.49,
+      (_, b'Q') => 0.19,
+      (0, b'R') => 6.0,
+      (_, b'R') => 7.3,
+      (0, b'S') => 11.0,
+      (_, b'S') => 8.7,
+      (0, b'T') => 5.0,
+      (_, b'T') => 6.7,
+      (0, b'U') => 2.9,
+      (_, b'U') => 3.3,
+      (0, b'V') => 1.5,
+      (_, b'V') => 1.0,
+      (0, b'W') => 2.7,
+      (_, b'W') => 0.91,
+      (0, b'X') => 0.05,
+      (_, b'X') => 0.27,
+      (0, b'Y') => 0.36,
+      (_, b'Y') => 1.6,
+      (0, b'Z') => 0.24,
+      (_, b'Z') => 0.44,
+      _ => unreachable!(),
+    })
+    .sum::<f32>();
+
+  if no_repeated_letters(word) {
+    score *= 5.0;
+  }
+
+  score
+}
+
+pub static FIVE_LETTER_WORDS: LazyLock<[[u8; 5]; 2309]> = LazyLock::new(|| {
+  let mut words = UNSORTED_FIVE_LETTER_WORDS;
+  words.sort_by(|a, b| score(b).total_cmp(&score(a)));
+  words
+});

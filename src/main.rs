@@ -39,13 +39,14 @@ impl std::fmt::Display for Attempts {
 }
 
 fn main() {
+  let mut rng = rand::rng();
   let mut buf = String::with_capacity(12);
   let mut guesser = Guesser::new(Vec::new());
   let mut attempts = Attempts::new();
 
   for turn in 1..=6 {
     println!("turn {turn} ({} remaining):", 6 - turn);
-    if let Some(s) = guesser.guess() {
+    if let Some(s) = guesser.guess(turn, &mut rng) {
       println!("suggestion: {s}");
     } else {
       println!("no such word exists in my dictionary");
@@ -77,7 +78,7 @@ fn main() {
       return;
     }
     guesser.analyze(feedback);
-    guesser.prune();
+    guesser.prune(turn);
     print!("candidates:");
     for (n, word) in (0..7).cycle().zip(guesser.candidates()) {
       if n == 0 { println!(); }
@@ -91,13 +92,13 @@ fn main() {
 
 #[cfg(test)]
 mod test {
-  use crate::{dictionary::FIVE_LETTER_WORDS, guess::{CharStatus, Guesser}, play::Player, Attempts};
+  use crate::{dictionary::FIVE_LETTER_WORDS, guess::Guesser, play::Player, Attempts};
   use rand::{prelude::*, rng};
 
   #[test]
-  fn test() {
-    let mut candidates_buf = Some(Vec::new());
+  fn test_random() {
     let mut rng = rng();
+    let mut candidates_buf = Some(Vec::new());
     let mut final_boards = Vec::new();
     'rounds: for (round, word) in FIVE_LETTER_WORDS.choose_multiple(&mut rng, 10).enumerate() {
       println!("\nround {round}:");
@@ -106,7 +107,7 @@ mod test {
       let mut guesses = Vec::new();
       let mut attempts = Attempts::new();
       for turn in 1..=6 {
-        let guess = guesser.guess().expect("should always have a suggestion");
+        let guess = guesser.guess(turn, &mut rng).expect("should always have a suggestion");
         guesses.push((*guess, guesser.candidates().len()));
         let stats = game.check(guess);
         attempts.push(stats);
@@ -117,7 +118,7 @@ mod test {
           continue 'rounds;
         }
         guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
-        guesser.prune();
+        guesser.prune(turn);
         assert!(guesser.candidates().contains(word), "should never remove actual word from candidates");
       }
       println!("failed to identify word in alloted time :(");
@@ -135,21 +136,22 @@ mod test {
 
   #[test]
   fn test_statistics() {
+    let mut rng = rng();
     let mut candidates_buf = Some(Vec::new());
     let mut turns = Vec::with_capacity(FIVE_LETTER_WORDS.len());
     'rounds: for word in FIVE_LETTER_WORDS.iter() {
       let game = Player::new(*word);
       let mut guesser = Guesser::new(candidates_buf.take().unwrap());
-      for i in 1..=6 {
-        let guess = guesser.guess().unwrap();
+      for turn in 1..=6 {
+        let guess = guesser.guess(turn, &mut rng).unwrap();
         let stats = game.check(guess);
         if guess == word {
-          turns.push(Some(i));
+          turns.push(Some(turn));
           candidates_buf = Some(guesser.extract_resources());
           continue 'rounds;
         }
         guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
-        guesser.prune();
+        guesser.prune(turn);
       }
       turns.push(None);
       candidates_buf = Some(guesser.extract_resources());
@@ -193,7 +195,7 @@ mod test {
       ");
 
       let mut slice = &successes[..];
-      let color = ['🟪', '🟦', '🟩', '🟨', '🟧', '🟥', '⬜'];
+      let color = ["🟪", "🟦", "🟩", "🟨", "🟧", "🟥", "⬜"];
       let mut ranges = [0; 7];
       for turns in 0..6 {
         let n = slice.partition_point(|&t| t == turns + 1);
@@ -202,19 +204,25 @@ mod test {
       }
       ranges[6] = lost;
       let most = ranges.iter().copied().max().unwrap();
-      println!("turns-to-win histogram:");
+      let scale = 45;
+      println!("\nturns-to-win histogram:");
       for (turns, n) in ranges.iter().copied().enumerate() {
-        if turns == 6 {
-          print!("_");
-        } else {
-          print!("{}", turns + 1);
-        }
-        print!(": {n:>5} ");
-        let col = color[turns as usize];
-        for _ in 0..((n as f64/most as f64)*30.0).floor() as usize {
-          print!("{col}");
-        }
-        println!();
+        println!("{}: {n:>5} {:⬛<2$}",
+          if turns == 6 { 'L' } else { char::from(b'1' + turns as u8) },
+          color[turns as usize].repeat((scale as f64*n as f64/most as f64).ceil() as usize),
+          scale,
+        );
+      }
+      println!("\nprobability of winning on a turn, given that turn has been reached:");
+      let mut contestants = turns.len();
+      for (turns, n) in ranges.iter().take(6).copied().enumerate() {
+        let p = n as f64/contestants as f64;
+        println!("{}: {p:>1.3} {:⬛<2$}",
+          turns + 1,
+          "🟩".repeat((scale as f64*p).ceil() as usize),
+          scale,
+        );
+        contestants -= n;
       }
     }
   }

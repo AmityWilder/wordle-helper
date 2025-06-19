@@ -1,5 +1,6 @@
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
+use rand::seq::IteratorRandom;
 use crate::{dictionary::*, word::{Letter, Word}, VERBOSE_MESSAGES};
 
 bitflags!{
@@ -75,20 +76,18 @@ impl Guesser {
     self.candidates
   }
 
-  pub fn guess(&self) -> Option<&Word> {
-    self.candidates.first()
+  pub fn guess<R: ?Sized + rand::Rng>(&self, turn: u32, rng: &mut R) -> Option<&Word> {
+    if turn == 1 {
+      self.candidates.iter()
+        .take(8)
+        .choose(rng)
+    } else {
+      self.candidates.first()
+    }
   }
 
   pub fn candidates(&self) -> &[Word] {
     &self.candidates
-  }
-
-  pub const fn confirmed_word(&self) -> Option<Word> {
-    if let [Some(c1), Some(c2), Some(c3), Some(c4), Some(c5)] = self.confirmed {
-      Some(Word([c1, c2, c3, c4, c5]))
-    } else {
-      None
-    }
   }
 
   fn confirm(&mut self, idx: usize, ch: Letter) {
@@ -183,7 +182,7 @@ impl Guesser {
     }
   }
 
-  pub fn prune(&mut self) {
+  pub fn prune(&mut self, turn: u32) {
     let include = |word: &Word| -> bool {
       // Must contain all confirmed
       word.iter().copied().zip(self.confirmed.iter().copied())
@@ -207,7 +206,7 @@ impl Guesser {
     self.candidates.retain(include);
     sort_by_frequency(&mut self.candidates);
 
-    if matches!(self.candidates.len(), 3..=26) {
+    if turn < 6 && matches!(self.candidates.len(), 3..=26) {
       let mut unique_letters = ArrayVec::<Letter, 26>::new();
       for (i, a) in self.candidates.iter().enumerate() {
         for (j, b) in self.candidates.iter().enumerate() {

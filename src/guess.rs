@@ -71,7 +71,6 @@ impl Guesser {
     }
   }
 
-  #[cfg(test)]
   pub fn extract_resources(self) -> Vec<Word> {
     self.candidates
   }
@@ -92,7 +91,7 @@ impl Guesser {
 
   fn confirm(&mut self, idx: usize, ch: Letter) {
     self.confirmed[idx] = Some(ch);
-    if VERBOSE_MESSAGES {
+    if *VERBOSE_MESSAGES {
       println!("letter '{ch}' is confirmed at position {}", idx + 1);
     }
   }
@@ -113,13 +112,13 @@ impl Guesser {
       .complement();
     let num_possible_positions = possible_positions.bits().count_ones();
     assert_ne!(num_possible_positions, 0, "letter '{ch}' has no possible placement");
-    if VERBOSE_MESSAGES {
+    if *VERBOSE_MESSAGES {
       println!("letter '{ch}' can only be placed in {possible_positions:?}");
     }
     if num_possible_positions == 1 {
       assert!(!possible_positions.is_empty());
       let only_open = possible_positions.into_index();
-      if VERBOSE_MESSAGES {
+      if *VERBOSE_MESSAGES {
         println!("letter '{ch}' can only be placed at position {}", only_open + 1);
       }
       self.confirm(only_open, ch);
@@ -136,7 +135,7 @@ impl Guesser {
         CharStatus::Excluded => {
           if let Err(pos) = self.excluded.binary_search(&ch) {
             self.excluded.insert(pos, ch);
-            if VERBOSE_MESSAGES {
+            if *VERBOSE_MESSAGES {
               println!("letter '{ch}' is not in the word");
             }
           }
@@ -148,7 +147,7 @@ impl Guesser {
             Ok(idx) => { self.required[idx].1.insert(pos); idx },
             Err(idx) => { self.required.insert(idx, (ch, pos)); idx },
           };
-          if VERBOSE_MESSAGES {
+          if *VERBOSE_MESSAGES {
             println!("letter '{ch}' is required but cannot be in {:?}", self.required[idx].1);
           }
           _ = self.pidgeon(idx);
@@ -157,7 +156,7 @@ impl Guesser {
         CharStatus::Confirmed => {
           self.confirm(i, ch);
           if let Ok(i) = self.required.binary_search_by_key(&ch, |(ch, _)| *ch) {
-            if VERBOSE_MESSAGES {
+            if *VERBOSE_MESSAGES {
               println!("letter '{ch}' no longer unknown");
             }
             _ = self.required.remove(i);
@@ -166,7 +165,7 @@ impl Guesser {
       }
     }
 
-    if VERBOSE_MESSAGES {
+    if *VERBOSE_MESSAGES {
       println!("draining...");
     }
     'outer: loop {
@@ -177,7 +176,7 @@ impl Guesser {
       }
       break;
     }
-    if VERBOSE_MESSAGES {
+    if *VERBOSE_MESSAGES {
       println!("feedback complete");
     }
   }
@@ -221,7 +220,7 @@ impl Guesser {
       }
 
       if unique_letters.len() >= 3 {
-        if VERBOSE_MESSAGES {
+        if *VERBOSE_MESSAGES {
           println!("candidates:");
           for candidate in &self.candidates {
             println!(" {candidate}");
@@ -255,7 +254,7 @@ impl Guesser {
         // prefer words without repeated letters
         possible_tiebreakers.sort_by_cached_key(|(w, _)| !w.is_unique());
 
-        if VERBOSE_MESSAGES {
+        if *VERBOSE_MESSAGES {
           println!("possible tiebreakers:");
           for (word, n) in &possible_tiebreakers {
             println!(" {word} ({n} distinct)");
@@ -263,7 +262,7 @@ impl Guesser {
         }
 
         if let Some((tiebreaker, n)) = possible_tiebreakers.first().copied() {
-          if VERBOSE_MESSAGES {
+          if *VERBOSE_MESSAGES {
             println!("tiebreaker ({n} distinguishing characters): {tiebreaker}");
           }
           self.candidates.insert(0, tiebreaker);

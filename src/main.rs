@@ -11,6 +11,17 @@ static IS_STATS_RUN: LazyLock<bool> = LazyLock::new(||
   std::env::args().any(|s| matches!(s.as_str(), "-s" | "--stats"))
 );
 
+static AUTO_RUN: LazyLock<Option<Word>> = LazyLock::new(||
+  std::env::args()
+    .find_map(|s|
+      s.as_bytes().strip_prefix(b"-a=")
+        .or_else(|| s.as_bytes().strip_prefix(b"--auto="))
+        .map(|bytes| bytes.trim_ascii())
+        .and_then(|bytes| (bytes.len() == 5).then(|| std::array::from_fn(|i| bytes[i].to_ascii_uppercase())))
+        .and_then(|bytes| Word::from_bytes(bytes))
+    )
+);
+
 mod word;
 mod dictionary;
 mod guess;
@@ -46,6 +57,7 @@ fn main() {
   if *IS_STATS_RUN {
     statistics();
   } else {
+    let game = AUTO_RUN.map(Game::new);
     let mut rng = rand::rng();
     let mut buf = String::with_capacity(12);
     let mut guesser = Guesser::new(Vec::new());
@@ -53,30 +65,34 @@ fn main() {
 
     for turn in 1..=6 {
       println!("turn {turn} ({} remaining):", 6 - turn);
-      if let Some(s) = guesser.guess(turn, &mut rng) {
-        println!("suggestion: {s}");
-      } else {
+      let Some(s) = guesser.guess(turn, &mut rng) else {
         println!("no such word exists in my dictionary");
         return;
-      }
-      buf.clear();
-      stdin().read_line(&mut buf).unwrap();
-      buf.truncate(buf.trim_end().len());
-      if buf.trim_end() == "exit" { return; }
-      stdin().read_line(&mut buf).unwrap();
-      buf.truncate(buf.trim_end().len());
-      assert!(buf.len() == 10);
-      let bytes = buf.as_bytes();
-      let feedback = std::array::from_fn(|i| (
-        Letter::from_u8(bytes[i].to_ascii_uppercase())
-          .expect("unknown format"),
-        match bytes[i + 5] {
-          b'+' => CharFeedback::Confirmed,
-          b'?' => CharFeedback::Required,
-          b'_' => CharFeedback::Excluded,
-          _ => panic!("unknown format"),
-        },
-      ));
+      };
+      println!("suggestion: {s}");
+      let feedback = if let Some(g) = &game {
+        let fb = g.check(s);
+        std::array::from_fn(|i| (s[i], fb[i]))
+      } else {
+        buf.clear();
+        stdin().read_line(&mut buf).unwrap();
+        buf.truncate(buf.trim_end().len());
+        if buf.trim_end() == "exit" { return; }
+        stdin().read_line(&mut buf).unwrap();
+        buf.truncate(buf.trim_end().len());
+        assert!(buf.len() == 10);
+        let bytes = buf.as_bytes();
+        std::array::from_fn(|i| (
+          Letter::from_u8(bytes[i].to_ascii_uppercase())
+            .expect("unknown format"),
+          match bytes[i + 5] {
+            b'+' => CharFeedback::Confirmed,
+            b'?' => CharFeedback::Required,
+            b'_' => CharFeedback::Excluded,
+            _ => panic!("unknown format"),
+          },
+        ))
+      };
       attempts.push(WordFeedback(feedback.map(|(_, stat)| stat)));
       if attempts.0.last() == Some(&WordFeedback([CharFeedback::Confirmed; 5])) {
         println!("{attempts}");

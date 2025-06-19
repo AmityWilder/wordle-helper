@@ -272,7 +272,7 @@ impl Guesser {
 
     if *VERBOSE_MESSAGES {
       println!("possible tiebreakers:");
-      for (word, mapping) in &possible_tiebreakers {
+      for (word, mapping) in possible_tiebreakers.iter().take(5) {
         println!(" {word}");
         for (encoding, words) in mapping {
           print!("  {encoding} -");

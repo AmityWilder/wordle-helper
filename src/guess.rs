@@ -1,8 +1,6 @@
 use std::collections::HashMap;
-
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
-use rand::seq::IteratorRandom;
 use crate::{dictionary::*, play::Game, word::{Letter, Word}, VERBOSE_MESSAGES};
 
 bitflags!{
@@ -103,14 +101,8 @@ impl Guesser {
     self.candidates
   }
 
-  pub fn guess<R: ?Sized + rand::Rng>(&self, turn: u32, rng: &mut R) -> Option<&Word> {
-    if turn == 1 {
-      self.candidates.iter()
-        .take(8)
-        .choose(rng)
-    } else {
-      self.candidates.first()
-    }
+  pub fn guess(&self) -> Option<&Word> {
+    self.candidates.first()
   }
 
   pub fn candidates(&self) -> &[Word] {

@@ -4,7 +4,7 @@ use guess::*;
 use crate::{dictionary::FIVE_LETTER_WORDS, play::Game, word::{Letter, Word}};
 
 pub static VERBOSE_MESSAGES: LazyLock<bool> = LazyLock::new(||
-  std::env::args().any(|s| matches!(s.as_str(), "-v" | "--verbose"))
+  !*IS_STATS_RUN && std::env::args().any(|s| matches!(s.as_str(), "-v" | "--verbose"))
 );
 
 static IS_STATS_RUN: LazyLock<bool> = LazyLock::new(||
@@ -12,14 +12,18 @@ static IS_STATS_RUN: LazyLock<bool> = LazyLock::new(||
 );
 
 static AUTO_RUN: LazyLock<Option<Word>> = LazyLock::new(||
-  std::env::args()
-    .find_map(|s|
-      s.as_bytes().strip_prefix(b"-a=")
-        .or_else(|| s.as_bytes().strip_prefix(b"--auto="))
-        .map(|bytes| bytes.trim_ascii())
-        .and_then(|bytes| (bytes.len() == 5).then(|| std::array::from_fn(|i| bytes[i].to_ascii_uppercase())))
-        .and_then(|bytes| Word::from_bytes(bytes))
-    )
+  if !*IS_STATS_RUN {
+    std::env::args()
+      .find_map(|s|
+        s.as_bytes().strip_prefix(b"-a=")
+          .or_else(|| s.as_bytes().strip_prefix(b"--auto="))
+          .map(|bytes| bytes.trim_ascii())
+          .and_then(|bytes| (bytes.len() == 5).then(|| std::array::from_fn(|i| bytes[i].to_ascii_uppercase())))
+          .and_then(|bytes| Word::from_bytes(bytes))
+      )
+  } else {
+    None
+  }
 );
 
 mod word;
@@ -58,14 +62,13 @@ fn main() {
     statistics();
   } else {
     let game = AUTO_RUN.map(Game::new);
-    let mut rng = rand::rng();
     let mut buf = String::with_capacity(12);
     let mut guesser = Guesser::new(Vec::new());
     let mut attempts = Attempts::new();
 
     for turn in 1..=6 {
       println!("turn {turn} ({} remaining):", 6 - turn);
-      let Some(s) = guesser.guess(turn, &mut rng) else {
+      let Some(s) = guesser.guess() else {
         println!("no such word exists in my dictionary");
         return;
       };
@@ -115,7 +118,6 @@ fn main() {
 }
 
 pub fn statistics() {
-  let mut rng = rand::rng();
   let mut candidates_buf = Some(Vec::new());
   let mut games: Vec<(bool, Word, ArrayVec<Word, 6>)> = Vec::with_capacity(FIVE_LETTER_WORDS.len());
   'rounds: for word in FIVE_LETTER_WORDS.iter() {
@@ -123,7 +125,7 @@ pub fn statistics() {
     let mut guesser = Guesser::new(candidates_buf.take().unwrap());
     let mut attempts = ArrayVec::<Word, 6>::new();
     for turn in 1..=6 {
-      let guess = guesser.guess(turn, &mut rng).unwrap();
+      let guess = guesser.guess().unwrap();
       attempts.push(*guess);
       let stats = game.check(guess);
       if guess == word {
@@ -204,18 +206,18 @@ pub fn statistics() {
     const COLORS: [&str; 7] = ["🟪", "🟦", "🟩", "🟨", "🟧", "🟥", "\u{2B1C}"];
     const COLOR_BAR: &str = "🟥🟥🟥🟥🟥🟥🟧🟧🟧🟧🟧🟧🟧🟨🟨🟨🟨🟨🟨🟨🟨🟩🟩🟩🟩🟩🟩🟩🟩🟦🟦🟦🟦🟦🟦🟦🟪🟪🟪🟪🟪🟪";
     const SCALE: usize = COLOR_BAR.len()/'🟥'.len_utf8();
-    const HEADERS: [&str; 5] = [
+    const HEADERS: [&str; 3] = [
       "\nwins per turn:\n",
       "\nprobability of winning on a turn:\n",
       "\nprobability of winning on a turn, given that turn has been reached:\n",
-      "\nprobability of having won in n turns or fewer:\n",
-      "\nprobability of needing at least n turns to win:\n",
+      // "\nprobability of having won in n turns or fewer:\n",
+      // "\nprobability of needing at least n turns to win:\n",
     ];
     let mut output = String::with_capacity(
       HEADERS.iter()
         .map(|s| s.len())
         .sum::<usize>() +
-      ("_: 00000 \n".len() + COLOR_BAR.len())*(6*4 + 1)
+      ("_: 00000 \n".len() + COLOR_BAR.len())*(6*HEADERS.len() + 1)
     );
 
     let mut ranges = [0; 7];
@@ -247,31 +249,35 @@ pub fn statistics() {
     output.push_str(HEADERS[2]);
     let mut contestants = turns.len();
     for (turn, n) in ranges.iter().take(6).copied().enumerate() {
-      let p = n as f64/contestants as f64;
-      write!(&mut output, "{}: {p:>1.3} {:⬛<SCALE$}\n",
-        turn + 1,
-        &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
-      ).unwrap();
+      if contestants == 0 {
+        write!(&mut output, "{}: no data, always won before this turn", turn + 1).unwrap();
+      } else {
+        let p = n as f64/contestants as f64;
+        write!(&mut output, "{}: {p:>1.3} {:⬛<SCALE$}\n",
+          turn + 1,
+          &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
+        ).unwrap();
+      }
       contestants -= n;
     }
-    output.push_str(HEADERS[3]);
-    let mut p = 0.0;
-    for (turn, n) in ranges.iter().take(6).copied().enumerate() {
-      p += n as f64/turns.len() as f64;
-      write!(&mut output, "{}: {p:>1.3} {:⬛<SCALE$}\n",
-        turn + 1,
-        &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
-      ).unwrap();
-    }
-    output.push_str(HEADERS[4]);
-    let mut p = 1.0;
-    for (turn, n) in ranges.iter().take(6).copied().enumerate() {
-      p -= n as f64/turns.len() as f64;
-      write!(&mut output, "{}: {p:>1.3} {:⬛<SCALE$}\n",
-        turn + 1,
-        &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
-      ).unwrap();
-    }
+    // output.push_str(HEADERS[3]);
+    // let mut p = 0.0;
+    // for (turn, n) in ranges.iter().take(6).copied().enumerate() {
+    //   p += n as f64/turns.len() as f64;
+    //   write!(&mut output, "{}: {p:>1.3} {:⬛<SCALE$}\n",
+    //     turn + 1,
+    //     &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
+    //   ).unwrap();
+    // }
+    // output.push_str(HEADERS[4]);
+    // let mut p = 1.0;
+    // for (turn, n) in ranges.iter().take(6).copied().enumerate() {
+    //   p -= n as f64/turns.len() as f64;
+    //   write!(&mut output, "{}: {p:>1.3} {:⬛<SCALE$}\n",
+    //     turn + 1,
+    //     &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
+    //   ).unwrap();
+    // }
     print!("{output}");
   }
 }
@@ -293,7 +299,7 @@ mod test {
       let mut guesses = Vec::new();
       let mut attempts = Attempts::new();
       for turn in 1..=6 {
-        let guess = guesser.guess(turn, &mut rng).expect("should always have a suggestion");
+        let guess = guesser.guess().expect("should always have a suggestion");
         guesses.push((*guess, guesser.candidates().len()));
         let stats = game.check(guess);
         attempts.push(stats);

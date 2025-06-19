@@ -199,31 +199,50 @@ mod test {
       const COLOR_BAR: &str = "🟥🟥🟥🟥🟥🟧🟧🟧🟧🟧🟧🟧🟨🟨🟨🟨🟨🟨🟨🟨🟩🟩🟩🟩🟩🟩🟩🟩🟦🟦🟦🟦🟦🟦🟦🟪🟪🟪🟪🟪";
       const SCALE: usize = COLOR_BAR.len()/'🟥'.len_utf8();
       let mut ranges = [0; 7];
-      for turns in 0..6 {
-        let n = slice.partition_point(|&t| t == turns + 1);
-        ranges[turns as usize] = n;
+      for turn in 0..6 {
+        let n = slice.partition_point(|&t| t == turn + 1);
+        ranges[turn as usize] = n;
         slice = &slice[n..];
       }
       ranges[6] = lost;
       let most = ranges.iter().copied().max().unwrap();
-      println!("\nturns-to-win histogram:");
-      for (turns, n) in ranges.iter().copied().enumerate() {
+      println!("\nwins per turn:");
+      for (turn, n) in ranges.iter().copied().enumerate() {
         println!("{}: {n:>5} {:⬛<2$}",
-          if turns == 6 { 'L' } else { char::from(b'1' + turns as u8) },
-          COLORS[turns as usize].repeat((SCALE as f64*n as f64/most as f64).ceil() as usize),
+          if turn == 6 { 'L' } else { char::from(b'1' + turn as u8) },
+          COLORS[turn as usize].repeat((SCALE as f64*n as f64/most as f64).round() as usize),
+          SCALE,
+        );
+      }
+      println!("\nprobability of winning on a turn:");
+      for (turn, n) in ranges.iter().take(6).copied().enumerate() {
+        let p = n as f64/turns.len() as f64;
+        println!("{}: {p:>1.3} {:⬛<2$}",
+          turn + 1,
+          &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
           SCALE,
         );
       }
       println!("\nprobability of winning on a turn, given that turn has been reached:");
       let mut contestants = turns.len();
-      for (turns, n) in ranges.iter().take(6).copied().enumerate() {
+      for (turn, n) in ranges.iter().take(6).copied().enumerate() {
         let p = n as f64/contestants as f64;
         println!("{}: {p:>1.3} {:⬛<2$}",
-          turns + 1,
-          &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).ceil() as usize],
+          turn + 1,
+          &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
           SCALE,
         );
         contestants -= n;
+      }
+      println!("\nprobability of having won in n turns or fewer:");
+      let mut p = 0.0;
+      for (turn, n) in ranges.iter().take(6).copied().enumerate() {
+        p += n as f64/turns.len() as f64;
+        println!("{}: {p:>1.3} {:⬛<2$}",
+          turn + 1,
+          &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).round() as usize],
+          SCALE,
+        );
       }
     }
   }

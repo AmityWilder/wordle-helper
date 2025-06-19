@@ -195,7 +195,9 @@ mod test {
       ");
 
       let mut slice = &successes[..];
-      let color = ["🟪", "🟦", "🟩", "🟨", "🟧", "🟥", "⬜"];
+      const COLORS: [&str; 7] = ["🟪", "🟦", "🟩", "🟨", "🟧", "🟥", "⬜"];
+      const COLOR_BAR: &str = "🟥🟥🟥🟥🟥🟧🟧🟧🟧🟧🟨🟨🟨🟨🟨🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟪🟪🟪🟪🟪";
+      const SCALE: usize = COLOR_BAR.len()/'🟥'.len_utf8();
       let mut ranges = [0; 7];
       for turns in 0..6 {
         let n = slice.partition_point(|&t| t == turns + 1);
@@ -204,13 +206,12 @@ mod test {
       }
       ranges[6] = lost;
       let most = ranges.iter().copied().max().unwrap();
-      let scale = 45;
       println!("\nturns-to-win histogram:");
       for (turns, n) in ranges.iter().copied().enumerate() {
         println!("{}: {n:>5} {:⬛<2$}",
           if turns == 6 { 'L' } else { char::from(b'1' + turns as u8) },
-          color[turns as usize].repeat((scale as f64*n as f64/most as f64).ceil() as usize),
-          scale,
+          COLORS[turns as usize].repeat((SCALE as f64*n as f64/most as f64).ceil() as usize),
+          SCALE,
         );
       }
       println!("\nprobability of winning on a turn, given that turn has been reached:");
@@ -219,8 +220,8 @@ mod test {
         let p = n as f64/contestants as f64;
         println!("{}: {p:>1.3} {:⬛<2$}",
           turns + 1,
-          "🟩".repeat((scale as f64*p).ceil() as usize),
-          scale,
+          &COLOR_BAR[..'🟥'.len_utf8()*(SCALE as f64*p).ceil() as usize],
+          SCALE,
         );
         contestants -= n;
       }

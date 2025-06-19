@@ -101,7 +101,7 @@ fn main() {
 pub fn statistics() {
   let mut rng = rand::rng();
   let mut candidates_buf = Some(Vec::new());
-  let mut games: Vec<(bool, ArrayVec<Word, 6>)> = Vec::with_capacity(FIVE_LETTER_WORDS.len());
+  let mut games: Vec<(bool, Word, ArrayVec<Word, 6>)> = Vec::with_capacity(FIVE_LETTER_WORDS.len());
   'rounds: for word in FIVE_LETTER_WORDS.iter() {
     let game = Player::new(*word);
     let mut guesser = Guesser::new(candidates_buf.take().unwrap());
@@ -111,14 +111,14 @@ pub fn statistics() {
       attempts.push(*guess);
       let stats = game.check(guess);
       if guess == word {
-        games.push((true, attempts));
+        games.push((true, *word, attempts));
         candidates_buf = Some(guesser.extract_resources());
         continue 'rounds;
       }
       guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
       guesser.prune(turn);
     }
-    games.push((false, attempts));
+    games.push((false, *word, attempts));
     candidates_buf = Some(guesser.extract_resources());
   }
 
@@ -127,15 +127,15 @@ pub fn statistics() {
     if let Ok(file) = std::fs::File::create("stats.csv") {
       use std::io::Write;
       let mut buf_writer = std::io::BufWriter::new(file);
-      _ = write!(buf_writer, "\"Success\"\t\"Turns\"\t\"Turn 1 word\"\t\"Turn 2 word\"\t\"Turn 3 word\"\t\"Turn 4 word\"\t\"Turn 5 word\"\t\"Turn 6 word\"");
-      for (success, attempts) in games.iter() {
+      _ = write!(buf_writer, "\"Word\"\t\"Success\"\t\"Turns\"\t\"Turn 1 word\"\t\"Turn 2 word\"\t\"Turn 3 word\"\t\"Turn 4 word\"\t\"Turn 5 word\"\t\"Turn 6 word\"");
+      for (success, word, attempts) in games.iter() {
         if *success {
-          _ = write!(buf_writer, "\nTRUE\t{}", attempts.len());
+          _ = write!(buf_writer, "\n{word}\tTRUE\t{}", attempts.len());
         } else {
-          _ = write!(buf_writer, "\nFALSE\t#N/A");
+          _ = write!(buf_writer, "\n{word}\tFALSE\t#N/A");
         }
-        for word in attempts {
-          _ = write!(buf_writer, "\t\"{word}\"");
+        for attempt in attempts {
+          _ = write!(buf_writer, "\t\"{attempt}\"");
         }
       }
       _ = buf_writer.flush();
@@ -143,7 +143,7 @@ pub fn statistics() {
   }
 
   let turns: Vec<_> = games.iter()
-    .map(|(success, words)| success.then(|| words.len() as u32))
+    .map(|(success, _, words)| success.then(|| words.len() as u32))
     .collect();
 
   let mut successes: Vec<_> = turns.iter()

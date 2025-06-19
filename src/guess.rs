@@ -130,6 +130,19 @@ impl Guesser {
   }
 
   pub fn analyze(&mut self, chars: [(Letter, CharStatus); 5]) {
+    if !matches!(chars, [
+      (_, CharStatus::Confirmed),
+      (_, CharStatus::Confirmed),
+      (_, CharStatus::Confirmed),
+      (_, CharStatus::Confirmed),
+      (_, CharStatus::Confirmed),
+    ]) {
+      let word_used = Word(chars.map(|(c, _)| c));
+      if let Some(pos) = self.candidates.iter().position(|word| word == &word_used) {
+        _ = self.candidates.remove(pos);
+      } // else: user-provided word
+    }
+
     for (i, (ch, stat)) in chars.into_iter().enumerate() {
       match stat {
         CharStatus::Excluded => {

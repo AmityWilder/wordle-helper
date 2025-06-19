@@ -270,9 +270,10 @@ impl Guesser {
     // prefer words without repeated letters
     possible_tiebreakers.sort_by_cached_key(|(w, _)| !w.is_unique());
 
+    let organic_mappings = generate_mapping(&self.candidates[0], &self.candidates);
+
     if *VERBOSE_MESSAGES {
-      println!("possible tiebreakers:");
-      for (word, mapping) in possible_tiebreakers.iter().take(5) {
+      fn tiebreaker_printout((word, mapping): &(Word, HashMap<WordFeedback, Vec<Word>>)) {
         println!(" {word}");
         for (encoding, words) in mapping {
           print!("  {encoding} -");
@@ -282,11 +283,22 @@ impl Guesser {
           println!();
         }
       }
+
+      if let Some(om) = organic_mappings.as_ref() {
+        println!("upcoming organic guess:");
+        tiebreaker_printout(&om);
+      } else {
+        println!("upcoming organic guess would not provide sufficient information");
+      }
+      println!("possible tiebreakers:");
+      for tb in possible_tiebreakers.iter().take(5) {
+        tiebreaker_printout(tb);
+      }
     }
 
     let possible_tiebreakers = possible_tiebreakers.into_iter();
 
-    if let Some((_, organic_mapping)) = generate_mapping(&self.candidates[0], &self.candidates) {
+    if let Some((_, organic_mapping)) = organic_mappings {
       possible_tiebreakers
         // only check the best tiebreaker candidates
         .take(5)

@@ -1,28 +1,26 @@
-use crate::{guess::CharStatus, word::Word};
+use crate::{guess::{CharFeedback, WordFeedback}, word::Word};
 
-pub struct Player {
+pub struct Game {
   word: Word,
 }
 
-impl Player {
+impl Game {
   pub const fn new(word: Word) -> Self {
-    Self {
-      word,
-    }
+    Self { word }
   }
 
-  pub fn check(&self, guess: &Word) -> [CharStatus; 5] {
-    std::array::from_fn(|i| {
+  pub fn check(&self, guess: &Word) -> WordFeedback {
+    WordFeedback(std::array::from_fn(|i| {
       let ch = guess[i];
       if self.word.contains(&ch) {
         if self.word[i] == ch {
-          CharStatus::Confirmed
+          CharFeedback::Confirmed
         } else {
-          CharStatus::Required
+          CharFeedback::Required
         }
       } else {
-        CharStatus::Excluded
+        CharFeedback::Excluded
       }
-    })
+    }))
   }
 }

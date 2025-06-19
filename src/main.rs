@@ -1,7 +1,7 @@
 use std::{io::stdin, sync::LazyLock};
 use arrayvec::ArrayVec;
 use guess::*;
-use crate::{dictionary::FIVE_LETTER_WORDS, play::Player, word::{Letter, Word}};
+use crate::{dictionary::FIVE_LETTER_WORDS, play::Game, word::{Letter, Word}};
 
 pub static VERBOSE_MESSAGES: LazyLock<bool> = LazyLock::new(||
   std::env::args().any(|s| matches!(s.as_str(), "-v" | "--verbose"))
@@ -16,14 +16,14 @@ mod dictionary;
 mod guess;
 mod play;
 
-pub struct Attempts(ArrayVec::<[CharStatus; 5], 6>);
+pub struct Attempts(ArrayVec::<WordFeedback, 6>);
 
 impl Attempts {
   pub const fn new() -> Self {
     Self(ArrayVec::new_const())
   }
 
-  pub fn push(&mut self, stats: [CharStatus; 5]) {
+  pub fn push(&mut self, stats: WordFeedback) {
     self.0.push(stats);
   }
 }
@@ -31,7 +31,7 @@ impl Attempts {
 impl std::fmt::Display for Attempts {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     for row in 0..self.0.len() {
-      for col in self.0[row] {
+      for col in self.0[row].0 {
         col.fmt(f)?;
       }
       if row + 1 < self.0.len() {
@@ -71,14 +71,14 @@ fn main() {
         Letter::from_u8(bytes[i].to_ascii_uppercase())
           .expect("unknown format"),
         match bytes[i + 5] {
-          b'+' => CharStatus::Confirmed,
-          b'?' => CharStatus::Required,
-          b'_' => CharStatus::Excluded,
+          b'+' => CharFeedback::Confirmed,
+          b'?' => CharFeedback::Required,
+          b'_' => CharFeedback::Excluded,
           _ => panic!("unknown format"),
         },
       ));
-      attempts.push(feedback.map(|(_, stat)| stat));
-      if attempts.0.last() == Some(&[CharStatus::Confirmed; 5]) {
+      attempts.push(WordFeedback(feedback.map(|(_, stat)| stat)));
+      if attempts.0.last() == Some(&WordFeedback([CharFeedback::Confirmed; 5])) {
         println!("{attempts}");
         let word = Word(feedback.map(|(ch, _)| ch));
         println!("success! winning word: {word}");
@@ -103,7 +103,7 @@ pub fn statistics() {
   let mut candidates_buf = Some(Vec::new());
   let mut games: Vec<(bool, Word, ArrayVec<Word, 6>)> = Vec::with_capacity(FIVE_LETTER_WORDS.len());
   'rounds: for word in FIVE_LETTER_WORDS.iter() {
-    let game = Player::new(*word);
+    let game = Game::new(*word);
     let mut guesser = Guesser::new(candidates_buf.take().unwrap());
     let mut attempts = ArrayVec::<Word, 6>::new();
     for turn in 1..=6 {
@@ -185,7 +185,7 @@ pub fn statistics() {
     ");
 
     let mut slice = &successes[..];
-    const COLORS: [&str; 7] = ["🟪", "🟦", "🟩", "🟨", "🟧", "🟥", "⬜"];
+    const COLORS: [&str; 7] = ["🟪", "🟦", "🟩", "🟨", "🟧", "🟥", "\u{2B1C}"];
     const COLOR_BAR: &str = "🟥🟥🟥🟥🟥🟥🟧🟧🟧🟧🟧🟧🟧🟨🟨🟨🟨🟨🟨🟨🟨🟩🟩🟩🟩🟩🟩🟩🟩🟦🟦🟦🟦🟦🟦🟦🟪🟪🟪🟪🟪🟪";
     const SCALE: usize = COLOR_BAR.len()/'🟥'.len_utf8();
     const HEADERS: [&str; 5] = [
@@ -262,7 +262,7 @@ pub fn statistics() {
 
 #[cfg(test)]
 mod test {
-  use crate::{dictionary::FIVE_LETTER_WORDS, guess::Guesser, play::Player, Attempts};
+  use crate::{dictionary::FIVE_LETTER_WORDS, guess::Guesser, play::Game, Attempts};
   use rand::{prelude::*, rng};
 
   #[test]
@@ -272,7 +272,7 @@ mod test {
     let mut final_boards = Vec::new();
     'rounds: for (round, word) in FIVE_LETTER_WORDS.choose_multiple(&mut rng, 10).enumerate() {
       println!("\nround {round}:");
-      let game = Player::new(*word);
+      let game = Game::new(*word);
       let mut guesser = Guesser::new(candidates_buf.take().expect("should always have buffer at round start"));
       let mut guesses = Vec::new();
       let mut attempts = Attempts::new();

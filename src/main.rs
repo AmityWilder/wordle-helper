@@ -126,16 +126,17 @@ pub fn statistics() {
   {
     if let Ok(file) = std::fs::File::create("stats.csv") {
       use std::io::Write;
+      const FALSE: Word = Word::from_bytes(*b"FALSE").unwrap();
       let mut buf_writer = std::io::BufWriter::new(file);
       _ = write!(buf_writer, "\"Word\"\t\"Success\"\t\"Turns\"\t\"Turn 1 word\"\t\"Turn 2 word\"\t\"Turn 3 word\"\t\"Turn 4 word\"\t\"Turn 5 word\"\t\"Turn 6 word\"");
       for (success, word, attempts) in games.iter() {
         if *success {
-          _ = write!(buf_writer, "\n{word}\tTRUE\t{}", attempts.len());
+          _ = write!(buf_writer, "\n\"{}{word}\"\tTRUE\t{}", if word == &FALSE { "'" } else { "" }, attempts.len());
         } else {
-          _ = write!(buf_writer, "\n{word}\tFALSE\t#N/A");
+          _ = write!(buf_writer, "\n\"{}{word}\"\tFALSE\t#N/A", if word == &FALSE { "'" } else { "" });
         }
         for attempt in attempts {
-          _ = write!(buf_writer, "\t\"{attempt}\"");
+          _ = write!(buf_writer, "\t\"{}{attempt}\"", if attempt == &FALSE { "'" } else { "" });
         }
       }
       _ = buf_writer.flush();

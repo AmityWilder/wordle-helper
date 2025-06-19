@@ -101,28 +101,54 @@ fn main() {
 pub fn statistics() {
   let mut rng = rand::rng();
   let mut candidates_buf = Some(Vec::new());
-  let mut turns = Vec::with_capacity(FIVE_LETTER_WORDS.len());
+  let mut games: Vec<(bool, ArrayVec<Word, 6>)> = Vec::with_capacity(FIVE_LETTER_WORDS.len());
   'rounds: for word in FIVE_LETTER_WORDS.iter() {
     let game = Player::new(*word);
     let mut guesser = Guesser::new(candidates_buf.take().unwrap());
+    let mut attempts = ArrayVec::<Word, 6>::new();
     for turn in 1..=6 {
       let guess = guesser.guess(turn, &mut rng).unwrap();
+      attempts.push(*guess);
       let stats = game.check(guess);
       if guess == word {
-        turns.push(Some(turn));
+        games.push((true, attempts));
         candidates_buf = Some(guesser.extract_resources());
         continue 'rounds;
       }
       guesser.analyze(std::array::from_fn(|i| (guess[i], stats[i])));
       guesser.prune(turn);
     }
-    turns.push(None);
+    games.push((false, attempts));
     candidates_buf = Some(guesser.extract_resources());
   }
 
+  // send statistics to CSV
+  {
+    if let Ok(file) = std::fs::File::create("stats.csv") {
+      use std::io::Write;
+      let mut buf_writer = std::io::BufWriter::new(file);
+      _ = write!(buf_writer, "\"Success\"\t\"Turns\"\t\"Turn 1 word\"\t\"Turn 2 word\"\t\"Turn 3 word\"\t\"Turn 4 word\"\t\"Turn 5 word\"\t\"Turn 6 word\"");
+      for (success, attempts) in games.iter() {
+        if *success {
+          _ = write!(buf_writer, "\nTRUE\t{}", attempts.len());
+        } else {
+          _ = write!(buf_writer, "\nFALSE\t#N/A");
+        }
+        for word in attempts {
+          _ = write!(buf_writer, "\t\"{word}\"");
+        }
+      }
+      _ = buf_writer.flush();
+    }
+  }
+
+  let turns: Vec<_> = games.iter()
+    .map(|(success, words)| success.then(|| words.len() as u32))
+    .collect();
+
   let mut successes: Vec<_> = turns.iter()
     .copied()
-    .filter_map(|x| x)
+    .filter_map(|n| n)
     .collect();
 
   successes.sort();

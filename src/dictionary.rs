@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 use crate::word::Word;
 
-const UNSORTED_FIVE_LETTER_WORDS: [Word; 12915] = unsafe { std::mem::transmute(include!("list.rs")) };
+const UNSORTED_FIVE_LETTER_WORDS: [Word; 12915] = unsafe { std::mem::transmute(include!("list.txt")) };
 
 pub fn sort_by_frequency(words: &mut [Word]) {
   let mut freq_analysis = [[0; 26]; 5];

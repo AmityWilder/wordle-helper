@@ -121,10 +121,10 @@ pub fn statistics() {
   let mut candidates_buf = Some(Vec::new());
   let mut games: Vec<(bool, Word, ArrayVec<Word, 6>)> = Vec::with_capacity(FIVE_LETTER_WORDS.len());
   let mut batch = 0;
-  'rounds: for (cycle, word) in (0..=100).cycle().zip(FIVE_LETTER_WORDS.iter()) {
+  'rounds: for (cycle, word) in (0..=10).cycle().zip(FIVE_LETTER_WORDS.iter()) {
     if cycle == 0 {
       println!("{:3.3}% complete", 100.0*batch as f64/FIVE_LETTER_WORDS.len() as f64);
-      batch += 100;
+      batch += 10;
     }
     let game = Game::new(*word);
     let mut guesser = Guesser::new(candidates_buf.take().unwrap());

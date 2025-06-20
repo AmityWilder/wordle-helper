@@ -34,27 +34,35 @@ const _: () = {
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum CharFeedback {
+#[repr(u8)]
+pub enum LetterFeedback {
   Excluded,
   Required,
   Confirmed,
 }
 
-impl std::fmt::Display for CharFeedback {
+impl std::fmt::Display for LetterFeedback {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      CharFeedback::Excluded => '\u{2B1C}',
-      CharFeedback::Required => '🟨',
-      CharFeedback::Confirmed => '🟩',
+      LetterFeedback::Excluded => '\u{2B1C}',
+      LetterFeedback::Required => '🟨',
+      LetterFeedback::Confirmed => '🟩',
     }.fmt(f)
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WordFeedback(pub [CharFeedback; 5]);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C, align(8))]
+pub struct WordFeedback([LetterFeedback; 5]);
+
+impl WordFeedback {
+  pub fn new(values: [LetterFeedback; 5]) -> Self {
+    Self(values)
+  }
+}
 
 impl std::ops::Deref for WordFeedback {
-  type Target = [CharFeedback; 5];
+  type Target = [LetterFeedback; 5];
 
   fn deref(&self) -> &Self::Target {
     &self.0
@@ -65,6 +73,10 @@ impl std::ops::DerefMut for WordFeedback {
   fn deref_mut(&mut self) -> &mut Self::Target {
     &mut self.0
   }
+}
+
+impl WordFeedback {
+  pub const COMBINATIONS: usize = 3usize.pow(5);
 }
 
 impl std::fmt::Display for WordFeedback {
@@ -149,13 +161,13 @@ impl Guesser {
     }
   }
 
-  pub fn analyze(&mut self, chars: [(Letter, CharFeedback); 5]) {
+  pub fn analyze(&mut self, chars: [(Letter, LetterFeedback); 5]) {
     if !matches!(chars, [
-      (_, CharFeedback::Confirmed),
-      (_, CharFeedback::Confirmed),
-      (_, CharFeedback::Confirmed),
-      (_, CharFeedback::Confirmed),
-      (_, CharFeedback::Confirmed),
+      (_, LetterFeedback::Confirmed),
+      (_, LetterFeedback::Confirmed),
+      (_, LetterFeedback::Confirmed),
+      (_, LetterFeedback::Confirmed),
+      (_, LetterFeedback::Confirmed),
     ]) {
       let word_used = Word(chars.map(|(c, _)| c));
       if let Some(pos) = self.candidates.iter().position(|word| word == &word_used) {
@@ -165,7 +177,7 @@ impl Guesser {
 
     for (i, (ch, stat)) in chars.into_iter().enumerate() {
       match stat {
-        CharFeedback::Excluded => {
+        LetterFeedback::Excluded => {
           if let Err(pos) = self.excluded.binary_search(&ch) {
             self.excluded.insert(pos, ch);
             if *VERBOSE_MESSAGES {
@@ -174,7 +186,7 @@ impl Guesser {
           }
         }
 
-        CharFeedback::Required => {
+        LetterFeedback::Required => {
           let pos = Positions::from_index(i).unwrap();
           let idx = match self.required.binary_search_by_key(&ch, |(r, _)| *r) {
             Ok(idx) => { self.required[idx].1.insert(pos); idx },
@@ -186,7 +198,7 @@ impl Guesser {
           _ = self.pidgeon(idx);
         }
 
-        CharFeedback::Confirmed => {
+        LetterFeedback::Confirmed => {
           self.confirm(i, ch);
           if let Ok(i) = self.required.binary_search_by_key(&ch, |(ch, _)| *ch) {
             if *VERBOSE_MESSAGES {
@@ -216,7 +228,7 @@ impl Guesser {
 
   fn encode_burner(&self) -> Option<Word> {
     fn generate_mapping(tiebreaker: &Word, candidates: &[Word]) -> Option<(Word, HashMap<WordFeedback, Vec<Word>>)> {
-      let mut mapping = HashMap::new();
+      let mut mapping = HashMap::with_capacity(8);
       for candidate in candidates {
         // Pretend the candidate IS the actual word.
         // If that were the case, how would our tiebreaker be judged?
@@ -224,8 +236,8 @@ impl Guesser {
           .check(&tiebreaker);
 
         mapping.entry(encoding)
-          .and_modify(|v: &mut Vec<Word>| v.push(*candidate))
-          .or_insert_with(|| vec![*candidate]);
+          .or_insert_with(|| Vec::with_capacity(8))
+          .push(*candidate)
       }
       // don't bother if the burner would have been just as effective as trying both
       if mapping.len() > 2 {
@@ -354,7 +366,7 @@ impl Guesser {
     self.candidates.retain(include);
     sort_by_frequency(&mut self.candidates);
 
-    if turn < 6 && matches!(self.candidates.len(), 3..=26) {
+    if turn < 6 && matches!(self.candidates.len(), 3..=32) {
       if let Some(tiebreaker) = self.encode_burner() {
         if *VERBOSE_MESSAGES {
           println!("tiebreaker: {tiebreaker}");

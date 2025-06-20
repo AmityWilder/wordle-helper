@@ -46,7 +46,7 @@ impl Attempts {
 impl std::fmt::Display for Attempts {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     for row in 0..self.0.len() {
-      for col in self.0[row].0 {
+      for col in &*self.0[row] {
         col.fmt(f)?;
       }
       if row + 1 < self.0.len() {
@@ -89,15 +89,15 @@ fn main() {
           Letter::from_u8(bytes[i].to_ascii_uppercase())
             .expect("unknown format"),
           match bytes[i + 5] {
-            b'+' => CharFeedback::Confirmed,
-            b'?' => CharFeedback::Required,
-            b'_' => CharFeedback::Excluded,
+            b'+' => LetterFeedback::Confirmed,
+            b'?' => LetterFeedback::Required,
+            b'_' => LetterFeedback::Excluded,
             _ => panic!("unknown format"),
           },
         ))
       };
-      attempts.push(WordFeedback(feedback.map(|(_, stat)| stat)));
-      if attempts.0.last() == Some(&WordFeedback([CharFeedback::Confirmed; 5])) {
+      attempts.push(WordFeedback::new(feedback.map(|(_, stat)| stat)));
+      if attempts.0.last() == Some(&WordFeedback::new([LetterFeedback::Confirmed; 5])) {
         println!("{attempts}");
         let word = Word(feedback.map(|(ch, _)| ch));
         println!("success! winning word: {word}");
@@ -120,7 +120,12 @@ fn main() {
 pub fn statistics() {
   let mut candidates_buf = Some(Vec::new());
   let mut games: Vec<(bool, Word, ArrayVec<Word, 6>)> = Vec::with_capacity(FIVE_LETTER_WORDS.len());
-  'rounds: for word in FIVE_LETTER_WORDS.iter() {
+  let mut batch = 0;
+  'rounds: for (cycle, word) in (0..=100).cycle().zip(FIVE_LETTER_WORDS.iter()) {
+    if cycle == 0 {
+      println!("{:3.3}% complete", 100.0*batch as f64/FIVE_LETTER_WORDS.len() as f64);
+      batch += 100;
+    }
     let game = Game::new(*word);
     let mut guesser = Guesser::new(candidates_buf.take().unwrap());
     let mut attempts = ArrayVec::<Word, 6>::new();
@@ -140,9 +145,9 @@ pub fn statistics() {
     candidates_buf = Some(guesser.extract_resources());
   }
 
-  // send statistics to CSV
+  // send statistics to TSV
   {
-    if let Ok(file) = std::fs::File::create("stats.csv") {
+    if let Ok(file) = std::fs::File::create("stats.tsv") {
       use std::io::Write;
       const FALSE: Word = Word::from_bytes(*b"FALSE").unwrap();
       let mut buf_writer = std::io::BufWriter::new(file);

@@ -1,4 +1,4 @@
-#![feature(maybe_uninit_slice, maybe_uninit_write_slice)]
+#![feature(portable_simd)]
 use std::{io::stdin, num::NonZeroUsize, sync::LazyLock};
 use arrayvec::ArrayVec;
 use guess::*;

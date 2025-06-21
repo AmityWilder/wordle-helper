@@ -439,7 +439,7 @@ impl Guesser {
     self.candidates.retain(include);
     sort_by_frequency(&mut self.candidates);
 
-    if turn < 6 && matches!(self.candidates.len(), 3..=WordFeedback::COMBINATIONS) {
+    if turn < 6 && matches!(self.candidates.len(), 3..=26) { // WordFeedback::COMBINATIONS
       if let Some(tiebreaker) = self.encode_burner() {
         if OPTIONS.is_verbose {
           println!("tiebreaker: {tiebreaker}");

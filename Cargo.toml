@@ -11,4 +11,4 @@ bitflags = "2.9.1"
 rand = "0.9.1"
 
 [profile.dev]
-opt-level = 1
+opt-level = 3

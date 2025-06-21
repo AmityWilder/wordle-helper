@@ -1,35 +1,92 @@
-use std::{io::stdin, sync::LazyLock};
+#![feature(maybe_uninit_slice, maybe_uninit_write_slice)]
+use std::{io::stdin, num::NonZeroUsize, sync::LazyLock};
 use arrayvec::ArrayVec;
 use guess::*;
-use crate::{dictionary::FIVE_LETTER_WORDS, play::Game, word::{Letter, Word}};
-
-pub static VERBOSE_MESSAGES: LazyLock<bool> = LazyLock::new(||
-  !*IS_STATS_RUN && std::env::args().any(|s| matches!(s.as_str(), "-v" | "--verbose"))
-);
-
-static IS_STATS_RUN: LazyLock<bool> = LazyLock::new(||
-  std::env::args().any(|s| matches!(s.as_str(), "-s" | "--stats"))
-);
-
-static AUTO_RUN: LazyLock<Option<Word>> = LazyLock::new(||
-  if !*IS_STATS_RUN {
-    std::env::args()
-      .find_map(|s|
-        s.as_bytes().strip_prefix(b"-a=")
-          .or_else(|| s.as_bytes().strip_prefix(b"--auto="))
-          .map(|bytes| bytes.trim_ascii())
-          .and_then(|bytes| (bytes.len() == 5).then(|| std::array::from_fn(|i| bytes[i].to_ascii_uppercase())))
-          .and_then(|bytes| Word::from_bytes(bytes))
-      )
-  } else {
-    None
-  }
-);
+use crate::{dictionary::FIVE_LETTER_WORDS, play::check_word, word::{Letter, Word}};
 
 mod word;
 mod dictionary;
 mod guess;
 mod play;
+
+pub struct AppOptions {
+  /// Print excessive debug information about the strategy's "thought process" while it plays
+  pub is_verbose: bool,
+
+  /// Every confirmed letter MUST be used in all subsequent guesses
+  pub is_hardmode: bool,
+
+  /// Play a specified number of games and generate stats on wins/losses/speed
+  ///
+  /// NOTE: Incompatible with `-v` for performance reasons and `-a` due to mutual incompatibility
+  pub stats_run: Option<NonZeroUsize>,
+
+  /// Provide the winning word and see how the application tries to solve it
+  pub auto_run: Option<Word>,
+}
+
+impl AppOptions {
+  pub fn init() -> Self {
+    let mut is_verbose = false;
+    let mut is_hardmode = false;
+    let mut stats_run = None;
+    let mut auto_run = None;
+
+    for arg in std::env::args() {
+      println!("{arg}");
+      if arg == "-v" {
+        is_verbose = true;
+      } else if arg == "-h" {
+        is_hardmode = true;
+      } else {
+        if let Some(arg) = arg.strip_prefix("-s") {
+          if !arg.is_empty() {
+            stats_run = arg.parse().ok().and_then(NonZeroUsize::new);
+          } else {
+            stats_run = Some(NonZeroUsize::new(FIVE_LETTER_WORDS.len())
+              .expect("should have at least 1 word in dictionary"))
+          }
+          if stats_run.is_some() {
+            if auto_run.is_some() {
+              println!("autorun is incompatible with stats run; disabling autorun");
+              auto_run = None;
+            }
+          } else {
+            println!("warning: stats run argument malformed. stats run will not be enabled");
+          }
+        } else if let Some(arg) = arg.strip_prefix("-a") {
+          if let [a, b, c, d, e] = arg.as_bytes() {
+            auto_run = Word::from_bytes([a, b, c, d, e].map(|ch| ch.to_ascii_uppercase()));
+          }
+          if auto_run.is_some() {
+            if stats_run.is_some() {
+              println!("stats run is incompatible with autorun; disabling stats run");
+              stats_run = None;
+            }
+          } else {
+            println!("warning: autorun argument malformed. autorun will not be enabled");
+          }
+        }
+      }
+    }
+
+    if stats_run.is_some() {
+      if is_verbose {
+        println!("verbose messages are disabled for stats runs");
+        is_verbose = false;
+      }
+    }
+
+    Self {
+      is_verbose,
+      is_hardmode,
+      stats_run,
+      auto_run,
+    }
+  }
+}
+
+pub static OPTIONS: LazyLock<AppOptions> = LazyLock::new(AppOptions::init);
 
 pub struct Attempts(ArrayVec::<WordFeedback, 6>);
 
@@ -58,10 +115,10 @@ impl std::fmt::Display for Attempts {
 }
 
 fn main() {
-  if *IS_STATS_RUN {
-    statistics();
+  if let Some(n) = OPTIONS.stats_run {
+    statistics(n);
   } else {
-    let game = AUTO_RUN.map(Game::new);
+    let game_word = OPTIONS.auto_run;
     let mut buf = String::with_capacity(12);
     let mut guesser = Guesser::new(Vec::new());
     let mut attempts = Attempts::new();
@@ -73,8 +130,8 @@ fn main() {
         return;
       };
       println!("suggestion: {s}");
-      let feedback = if let Some(g) = &game {
-        let fb = g.check(s);
+      let feedback = if let Some(g) = &game_word {
+        let fb = check_word(*g, *s);
         std::array::from_fn(|i| (s[i], fb[i]))
       } else {
         buf.clear();
@@ -117,22 +174,22 @@ fn main() {
   }
 }
 
-pub fn statistics() {
+pub fn statistics(n: NonZeroUsize) {
+  const BATCH_SIZE: usize = 100;
   let mut candidates_buf = Some(Vec::new());
-  let mut games: Vec<(bool, Word, ArrayVec<Word, 6>)> = Vec::with_capacity(FIVE_LETTER_WORDS.len());
+  let mut games: Vec<(bool, Word, ArrayVec<Word, 6>)> = Vec::with_capacity(n.get());
   let mut batch = 0;
-  'rounds: for (cycle, word) in (0..=10).cycle().zip(FIVE_LETTER_WORDS.iter()) {
+  'rounds: for (cycle, word) in (0..BATCH_SIZE).cycle().zip(FIVE_LETTER_WORDS.iter()) {
     if cycle == 0 {
-      println!("{:3.3}% complete", 100.0*batch as f64/FIVE_LETTER_WORDS.len() as f64);
-      batch += 10;
+      println!("{:3.3}% complete", 100.0*batch as f64/n.get() as f64);
+      batch += BATCH_SIZE;
     }
-    let game = Game::new(*word);
     let mut guesser = Guesser::new(candidates_buf.take().unwrap());
     let mut attempts = ArrayVec::<Word, 6>::new();
     for turn in 1..=6 {
       let guess = guesser.guess().unwrap();
       attempts.push(*guess);
-      let stats = game.check(guess);
+      let stats = check_word(*word, *guess);
       if guess == word {
         games.push((true, *word, attempts));
         candidates_buf = Some(guesser.extract_resources());
@@ -289,7 +346,7 @@ pub fn statistics() {
 
 #[cfg(test)]
 mod test {
-  use crate::{dictionary::FIVE_LETTER_WORDS, guess::Guesser, play::Game, Attempts};
+  use crate::{dictionary::FIVE_LETTER_WORDS, guess::Guesser, play::check_word, Attempts};
   use rand::{prelude::*, rng};
 
   #[test]
@@ -299,14 +356,13 @@ mod test {
     let mut final_boards = Vec::new();
     'rounds: for (round, word) in FIVE_LETTER_WORDS.choose_multiple(&mut rng, 10).enumerate() {
       println!("\nround {round}:");
-      let game = Game::new(*word);
       let mut guesser = Guesser::new(candidates_buf.take().expect("should always have buffer at round start"));
       let mut guesses = Vec::new();
       let mut attempts = Attempts::new();
       for turn in 1..=6 {
         let guess = guesser.guess().expect("should always have a suggestion");
         guesses.push((*guess, guesser.candidates().len()));
-        let stats = game.check(guess);
+        let stats = check_word(*word, *guess);
         attempts.push(stats);
         if guess == word {
           println!("won on turn {turn}");
@@ -329,10 +385,5 @@ mod test {
       }
       println!();
     }
-  }
-
-  #[test]
-  fn test_statistics() {
-    super::statistics()
   }
 }

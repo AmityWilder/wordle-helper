@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
-use crate::{dictionary::*, play::Game, word::{Letter, Word}, VERBOSE_MESSAGES};
+use crate::{dictionary::*, word::{Letter, Word}, OPTIONS};
 
 bitflags!{
   #[derive(Debug, Clone, Copy)]
@@ -51,13 +51,25 @@ impl std::fmt::Display for LetterFeedback {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C, align(8))]
 pub struct WordFeedback([LetterFeedback; 5]);
 
-impl WordFeedback {
-  pub fn new(values: [LetterFeedback; 5]) -> Self {
-    Self(values)
+impl PartialOrd for WordFeedback {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Ord for WordFeedback {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    self.to_u64().cmp(&other.to_u64())
+  }
+}
+
+impl std::hash::Hash for WordFeedback {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    self.to_u64().hash(state);
   }
 }
 
@@ -75,16 +87,60 @@ impl std::ops::DerefMut for WordFeedback {
   }
 }
 
-impl WordFeedback {
-  pub const COMBINATIONS: usize = 3usize.pow(5);
-}
-
 impl std::fmt::Display for WordFeedback {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     for ch in self.0 {
       ch.fmt(f)?;
     }
     Ok(())
+  }
+}
+
+impl WordFeedback {
+  pub const COMBINATIONS: usize = 3usize.pow(5);
+
+  #[inline(always)]
+  pub const fn new(values: [LetterFeedback; 5]) -> Self {
+    Self(values)
+  }
+
+  #[inline(always)]
+  pub const fn to_u64(self) -> u64 {
+    unsafe { std::mem::transmute::<_, u64>(self) }
+  }
+}
+
+struct FeedbackMap<T> {
+  data: Vec<(WordFeedback, T)>,
+}
+
+impl<T> FeedbackMap<T> {
+  pub fn with_capacity(capacity: usize) -> Self {
+    Self {
+      data: Vec::with_capacity(capacity),
+    }
+  }
+
+  pub const fn len(&self) -> usize {
+    self.data.len()
+  }
+
+  pub fn get_or_insert_with<F: FnOnce() -> T>(&mut self, key: WordFeedback, f: F) -> &mut T {
+    match self.data.binary_search_by_key(&key, |(k, _)| *k) {
+      Ok(idx) => &mut self.data[idx].1,
+      Err(idx) => {
+        self.data.insert(idx, (key, f()));
+        &mut self.data[idx].1
+      }
+    }
+  }
+
+  pub fn values<'a>(&'a self) -> std::iter::Map<std::slice::Iter<'a, (WordFeedback, T)>, fn(&'a (WordFeedback, T)) -> &'a T> {
+    self.data.iter().map(|x| &x.1)
+  }
+
+  pub fn entries(&self) -> std::slice::Iter<'_, (WordFeedback, T)> {
+    self.data.iter()
   }
 }
 
@@ -95,6 +151,19 @@ pub struct Guesser {
   /// Sorted alphabetically
   required: ArrayVec<(Letter, Positions), 5>,
   confirmed: [Option<Letter>; 5],
+}
+
+thread_local! {
+  static BUFFER: RefCell<Box<[WordFeedback]>> = RefCell::new({
+    let cap = FIVE_LETTER_WORDS.len()*FIVE_LETTER_WORDS.len();
+    let mut v = Vec::with_capacity(cap);
+    unsafe { v.set_len(cap); }
+    v.into_boxed_slice()
+  });
+
+  static TIEBREAKERS: RefCell<Vec<(Word, FeedbackMap<Vec<Word>>)>> = RefCell::new(
+    Vec::with_capacity(FIVE_LETTER_WORDS.len()),
+  );
 }
 
 impl Guesser {
@@ -123,7 +192,7 @@ impl Guesser {
 
   fn confirm(&mut self, idx: usize, ch: Letter) {
     self.confirmed[idx] = Some(ch);
-    if *VERBOSE_MESSAGES {
+    if OPTIONS.is_verbose {
       println!("letter '{ch}' is confirmed at position {}", idx + 1);
     }
   }
@@ -144,13 +213,13 @@ impl Guesser {
       .complement();
     let num_possible_positions = possible_positions.bits().count_ones();
     assert_ne!(num_possible_positions, 0, "letter '{ch}' has no possible placement");
-    if *VERBOSE_MESSAGES {
+    if OPTIONS.is_verbose {
       println!("letter '{ch}' can only be placed in {possible_positions:?}");
     }
     if num_possible_positions == 1 {
       assert!(!possible_positions.is_empty());
       let only_open = possible_positions.into_index();
-      if *VERBOSE_MESSAGES {
+      if OPTIONS.is_verbose {
         println!("letter '{ch}' can only be placed at position {}", only_open + 1);
       }
       self.confirm(only_open, ch);
@@ -180,7 +249,7 @@ impl Guesser {
         LetterFeedback::Excluded => {
           if let Err(pos) = self.excluded.binary_search(&ch) {
             self.excluded.insert(pos, ch);
-            if *VERBOSE_MESSAGES {
+            if OPTIONS.is_verbose {
               println!("letter '{ch}' is not in the word");
             }
           }
@@ -192,7 +261,7 @@ impl Guesser {
             Ok(idx) => { self.required[idx].1.insert(pos); idx },
             Err(idx) => { self.required.insert(idx, (ch, pos)); idx },
           };
-          if *VERBOSE_MESSAGES {
+          if OPTIONS.is_verbose {
             println!("letter '{ch}' is required but cannot be in {:?}", self.required[idx].1);
           }
           _ = self.pidgeon(idx);
@@ -201,7 +270,7 @@ impl Guesser {
         LetterFeedback::Confirmed => {
           self.confirm(i, ch);
           if let Ok(i) = self.required.binary_search_by_key(&ch, |(ch, _)| *ch) {
-            if *VERBOSE_MESSAGES {
+            if OPTIONS.is_verbose {
               println!("letter '{ch}' no longer unknown");
             }
             _ = self.required.remove(i);
@@ -210,7 +279,7 @@ impl Guesser {
       }
     }
 
-    if *VERBOSE_MESSAGES {
+    if OPTIONS.is_verbose {
       println!("draining...");
     }
     'outer: loop {
@@ -221,88 +290,97 @@ impl Guesser {
       }
       break;
     }
-    if *VERBOSE_MESSAGES {
+    if OPTIONS.is_verbose {
       println!("feedback complete");
     }
   }
 
+  #[inline(never)]
   fn encode_burner(&self) -> Option<Word> {
-    fn generate_mapping(tiebreaker: &Word, candidates: &[Word]) -> Option<(Word, HashMap<WordFeedback, Vec<Word>>)> {
-      let mut mapping = HashMap::with_capacity(8);
-      for candidate in candidates {
+    TIEBREAKERS.with_borrow_mut(|possible_tiebreakers| {
+      possible_tiebreakers.clear();
+
+      BUFFER.with_borrow_mut(|buf| {
         // Pretend the candidate IS the actual word.
         // If that were the case, how would our tiebreaker be judged?
-        let encoding = Game::new(*candidate)
-          .check(&tiebreaker);
+        let n = FIVE_LETTER_WORDS.len()*self.candidates.len();
+        let buf = &mut buf[0..n];
+        crate::play::grade_many(FIVE_LETTER_WORDS.as_slice(), self.candidates.as_slice(), buf);
 
-        mapping.entry(encoding)
-          .or_insert_with(|| Vec::with_capacity(8))
-          .push(*candidate)
-      }
-      // don't bother if the burner would have been just as effective as trying both
-      if mapping.len() > 2 {
-        Some((*tiebreaker, mapping))
-      } else {
-        None
-      }
-    }
-
-    let mut possible_tiebreakers = FIVE_LETTER_WORDS.iter()
-      .filter_map(|tiebreaker| generate_mapping(tiebreaker, &self.candidates))
-      .collect::<Vec<_>>();
-
-    // prefer words with fewer letters we already know
-    possible_tiebreakers.sort_by_cached_key(|(w, _)|
-      self.excluded.iter().copied()
-        .chain(self.required.iter().copied().map(|(ch, _)| ch))
-        .chain(self.confirmed.iter().copied().filter_map(|ch| ch))
-        .filter(|ch| w.contains(ch))
-        .count()
-    );
-
-    // prefer words with more tiebreakers
-    possible_tiebreakers.sort_by_key(|(_, m)| usize::MAX - m.len());
-
-    // prefer more potent tiebreakers
-    possible_tiebreakers.sort_by_key(|(_, m)|
-      m.values()
-        // more words in the same bucket are exponentially less valuable than having the same number of words in more buckets
-        .map(|v| v.len().saturating_pow(4))
-        .sum::<usize>()
-    );
-
-    // prefer words without repeated letters
-    possible_tiebreakers.sort_by_cached_key(|(w, _)| !w.is_unique());
-
-    let organic_mappings = generate_mapping(&self.candidates[0], &self.candidates);
-
-    if *VERBOSE_MESSAGES {
-      fn tiebreaker_printout((word, mapping): &(Word, HashMap<WordFeedback, Vec<Word>>)) {
-        println!(" {word}");
-        for (encoding, words) in mapping {
-          print!("  {encoding} -");
-          for w in words {
-            print!(" {w}");
+        for (i, guess) in FIVE_LETTER_WORDS.iter().copied().enumerate() {
+          let mut mapping = FeedbackMap::with_capacity(8);
+          for (j, word) in self.candidates.iter().copied().enumerate() {
+            let encoding = buf[i * self.candidates.len() + j];
+            mapping.get_or_insert_with(encoding, || Vec::with_capacity(8))
+              .push(word);
           }
-          println!();
+          possible_tiebreakers.push((guess, mapping));
+        }
+      });
+
+      // don't bother if the burner would have been just as effective as trying both
+      possible_tiebreakers.retain(|(_, mapping)| mapping.len() > 2);
+
+      // prefer words with fewer letters we already know
+      possible_tiebreakers.sort_by_cached_key(|(w, _)|
+        self.excluded.iter().copied()
+          .chain(self.required.iter().copied().map(|(ch, _)| ch))
+          .chain(self.confirmed.iter().copied().filter_map(|ch| ch))
+          .filter(|ch| w.contains(ch))
+          .count()
+      );
+
+      // prefer words with more tiebreakers
+      possible_tiebreakers.sort_by_key(|(_, m)| usize::MAX - m.len());
+
+      // prefer more potent tiebreakers
+      possible_tiebreakers.sort_by_key(|(_, m)|
+        m.values()
+          // more words in the same bucket are exponentially less valuable than having the same number of words in more buckets
+          .map(|v| v.len().saturating_pow(4))
+          .sum::<usize>()
+      );
+
+      // prefer words without repeated letters
+      possible_tiebreakers.sort_by_cached_key(|(w, _)| !w.is_unique());
+
+      let mut om_buf = Vec::with_capacity(self.candidates.len());
+      unsafe { om_buf.set_len(self.candidates.len()); }
+      crate::play::grade_many(&self.candidates[0..1], self.candidates.as_slice(), om_buf.as_mut_slice());
+
+      let mut it = om_buf.into_iter();
+      let mut organic_mappings = FeedbackMap::with_capacity(8);
+      for word in self.candidates.iter().copied() {
+        let encoding = it.next().unwrap();
+        organic_mappings.get_or_insert_with(encoding, || Vec::with_capacity(8))
+          .push(word);
+      }
+      let organic_mappings = (self.candidates[0], organic_mappings);
+
+      if OPTIONS.is_verbose {
+        fn tiebreaker_printout((word, mapping): &(Word, FeedbackMap<Vec<Word>>)) {
+          println!(" {word}");
+          for (encoding, words) in mapping.entries() {
+            print!("  {encoding} -");
+            for w in words {
+              print!(" {w}");
+            }
+            println!();
+          }
+        }
+
+        println!("upcoming organic guess:");
+        tiebreaker_printout(&organic_mappings);
+        println!("possible tiebreakers:");
+        for tb in possible_tiebreakers.iter().take(5) {
+          tiebreaker_printout(tb);
         }
       }
 
-      if let Some(om) = organic_mappings.as_ref() {
-        println!("upcoming organic guess:");
-        tiebreaker_printout(&om);
-      } else {
-        println!("upcoming organic guess would not provide sufficient information");
-      }
-      println!("possible tiebreakers:");
-      for tb in possible_tiebreakers.iter().take(5) {
-        tiebreaker_printout(tb);
-      }
-    }
+      let possible_tiebreakers = possible_tiebreakers.iter();
 
-    let possible_tiebreakers = possible_tiebreakers.into_iter();
+      let (_, organic_mappings) = organic_mappings;
 
-    if let Some((_, organic_mapping)) = organic_mappings {
       possible_tiebreakers
         // only check the best tiebreaker candidates
         .take(5)
@@ -310,7 +388,7 @@ impl Guesser {
         // only use a tiebreaker if guaranteed to actually provide an advantage
         .find_map(|(tiebreaker, mapping)| {
           use std::cmp::Ordering;
-          match mapping.len().cmp(&organic_mapping.len()) {
+          match mapping.len().cmp(&organic_mappings.len()) {
             // fewer buckets than organic; guaranteed less potent
             Ordering::Less => false,
 
@@ -319,7 +397,7 @@ impl Guesser {
 
             // compare potency
             Ordering::Equal => {
-              match mapping.values().map(|v| v.len()).max().cmp(&organic_mapping.values().map(|v| v.len()).max()) {
+              match mapping.values().map(|v| v.len()).max().cmp(&organic_mappings.values().map(|v| v.len()).max()) {
                 // worst case has better chance than for organic
                 Ordering::Less => true,
 
@@ -329,17 +407,12 @@ impl Guesser {
                 // last chance to prove yourself:
                 // same number of buckets, same worst case, who has a better average case?
                 // (don't need to divide because denominator is shared)
-                Ordering::Equal => mapping.values().map(|v| v.len()).sum::<usize>() < organic_mapping.values().map(|v| v.len()).sum::<usize>(),
+                Ordering::Equal => mapping.values().map(|v| v.len()).sum::<usize>() < organic_mappings.values().map(|v| v.len()).sum::<usize>(),
               }
             }
-          }.then_some(tiebreaker)
+          }.then_some(*tiebreaker)
         })
-    } else {
-      // organic wasn't even worth it but the tiebreaker is
-      possible_tiebreakers
-        .map(|(w, _)| w)
-        .next()
-    }
+    })
   }
 
   pub fn prune(&mut self, turn: u32) {
@@ -368,7 +441,7 @@ impl Guesser {
 
     if turn < 6 && matches!(self.candidates.len(), 3..=WordFeedback::COMBINATIONS) {
       if let Some(tiebreaker) = self.encode_burner() {
-        if *VERBOSE_MESSAGES {
+        if OPTIONS.is_verbose {
           println!("tiebreaker: {tiebreaker}");
         }
         self.candidates.insert(0, tiebreaker);

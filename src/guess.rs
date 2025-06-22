@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
-use crate::{dictionary::*, word::{Letter, Word}, OPTIONS};
+use crate::{dictionary::*, verbose_println, word::{Letter, Word}, OPTIONS};
 
 bitflags!{
   #[derive(Debug, Clone, Copy)]
@@ -192,9 +192,7 @@ impl Guesser {
 
   fn confirm(&mut self, idx: usize, ch: Letter) {
     self.confirmed[idx] = Some(ch);
-    if OPTIONS.is_verbose {
-      println!("letter '{ch}' is confirmed at position {}", idx + 1);
-    }
+    verbose_println!("letter '{ch}' is confirmed at position {}", idx + 1);
   }
 
   /// If only one possible space, treat as confirmed
@@ -213,15 +211,11 @@ impl Guesser {
       .complement();
     let num_possible_positions = possible_positions.bits().count_ones();
     assert_ne!(num_possible_positions, 0, "letter '{ch}' has no possible placement");
-    if OPTIONS.is_verbose {
-      println!("letter '{ch}' can only be placed in {possible_positions:?}");
-    }
+    verbose_println!("letter '{ch}' can only be placed in {possible_positions:?}");
     if num_possible_positions == 1 {
       assert!(!possible_positions.is_empty());
       let only_open = possible_positions.into_index();
-      if OPTIONS.is_verbose {
-        println!("letter '{ch}' can only be placed at position {}", only_open + 1);
-      }
+      verbose_println!("letter '{ch}' can only be placed at position {}", only_open + 1);
       self.confirm(only_open, ch);
       _ = self.required.remove(idx);
       true
@@ -249,9 +243,7 @@ impl Guesser {
         LetterFeedback::Excluded => {
           if let Err(pos) = self.excluded.binary_search(&ch) {
             self.excluded.insert(pos, ch);
-            if OPTIONS.is_verbose {
-              println!("letter '{ch}' is not in the word");
-            }
+            verbose_println!("letter '{ch}' is not in the word");
           }
         }
 
@@ -261,27 +253,21 @@ impl Guesser {
             Ok(idx) => { self.required[idx].1.insert(pos); idx },
             Err(idx) => { self.required.insert(idx, (ch, pos)); idx },
           };
-          if OPTIONS.is_verbose {
-            println!("letter '{ch}' is required but cannot be in {:?}", self.required[idx].1);
-          }
+          verbose_println!("letter '{ch}' is required but cannot be in {:?}", self.required[idx].1);
           _ = self.pidgeon(idx);
         }
 
         LetterFeedback::Confirmed => {
           self.confirm(i, ch);
           if let Ok(i) = self.required.binary_search_by_key(&ch, |(ch, _)| *ch) {
-            if OPTIONS.is_verbose {
-              println!("letter '{ch}' no longer unknown");
-            }
+            verbose_println!("letter '{ch}' no longer unknown");
             _ = self.required.remove(i);
           }
         }
       }
     }
 
-    if OPTIONS.is_verbose {
-      println!("draining...");
-    }
+    verbose_println!("draining...");
     'outer: loop {
       for i in 0..self.required.len() {
         if self.pidgeon(i) {
@@ -290,9 +276,7 @@ impl Guesser {
       }
       break;
     }
-    if OPTIONS.is_verbose {
-      println!("feedback complete");
-    }
+    verbose_println!("feedback complete");
   }
 
   #[inline(never)]
@@ -357,7 +341,7 @@ impl Guesser {
       }
       let organic_mappings = (self.candidates[0], organic_mappings);
 
-      if OPTIONS.is_verbose {
+      if OPTIONS.get().unwrap().is_verbose {
         fn tiebreaker_printout((word, mapping): &(Word, FeedbackMap<Vec<Word>>)) {
           println!(" {word}");
           for (encoding, words) in mapping.entries() {
@@ -441,9 +425,7 @@ impl Guesser {
 
     if turn < 6 && matches!(self.candidates.len(), 3..=26) { // WordFeedback::COMBINATIONS
       if let Some(tiebreaker) = self.encode_burner() {
-        if OPTIONS.is_verbose {
-          println!("tiebreaker: {tiebreaker}");
-        }
+        verbose_println!("tiebreaker: {tiebreaker}");
         self.candidates.insert(0, tiebreaker);
       }
     }

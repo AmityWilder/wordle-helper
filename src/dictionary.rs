@@ -27,12 +27,7 @@ pub static FIVE_LETTER_WORDS: LazyLock<Vec<Word>> = LazyLock::new(|| {
     .map(|word| {
       debug_assert_eq!(word.len(), 5);
       let bytes = unsafe { *(word.as_ptr() as *const [u8; 5]) };
-      #[cfg(debug_assertions)] {
-        Word::from_bytes(bytes).expect("words in list.txt should be valid")
-      }
-      #[cfg(not(debug_assertions))] {
-        unsafe { Word::from_bytes_unchecked(bytes) }
-      }
+      Word::from_bytes(bytes).expect("words in list.txt should be valid")
     })
     .collect::<Vec<Word>>();
   sort_by_frequency(&mut words);

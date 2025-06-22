@@ -1,4 +1,4 @@
-#![feature(test)]
+#![feature(test, iter_next_chunk)]
 
 use std::{io::stdin, num::NonZeroUsize, sync::OnceLock};
 use arrayvec::ArrayVec;
@@ -390,12 +390,14 @@ mod tests {
     let words = &FIVE_LETTER_WORDS[..64];
     let n = guesses.len()*words.len();
     let mut buffer = Vec::with_capacity(n);
-    unsafe { buffer.set_len(n) };
-    b.iter(|| play::grade_many(
-      test::black_box(guesses),
-      test::black_box(words),
-      buffer.as_mut_slice(),
-    ));
+    unsafe { buffer.set_len(n); }
+    b.iter(|| {
+      play::grade_many(
+        test::black_box(guesses),
+        test::black_box(words),
+        &mut buffer[..],
+      );
+    });
   }
 
   #[test]

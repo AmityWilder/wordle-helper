@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
-use crate::{dictionary::*, verbose_println, word::{Letter, Word}, OPTIONS};
+use crate::{dictionary::*, play::grade_many, verbose_println, word::{Letter, Word}, OPTIONS};
 
 bitflags!{
   #[derive(Debug, Clone, Copy)]
@@ -154,12 +154,9 @@ pub struct Guesser {
 }
 
 thread_local! {
-  static BUFFER: RefCell<Box<[WordFeedback]>> = RefCell::new({
-    let cap = FIVE_LETTER_WORDS.len()*FIVE_LETTER_WORDS.len();
-    let mut v = Vec::with_capacity(cap);
-    unsafe { v.set_len(cap); }
-    v.into_boxed_slice()
-  });
+  static BUFFER: RefCell<Vec<WordFeedback>> = RefCell::new(
+    Vec::with_capacity(FIVE_LETTER_WORDS.len()*FIVE_LETTER_WORDS.len())
+  );
 
   static TIEBREAKERS: RefCell<Vec<(Word, FeedbackMap<Vec<Word>>)>> = RefCell::new(
     Vec::with_capacity(FIVE_LETTER_WORDS.len()),
@@ -287,9 +284,7 @@ impl Guesser {
       BUFFER.with_borrow_mut(|buf| {
         // Pretend the candidate IS the actual word.
         // If that were the case, how would our tiebreaker be judged?
-        let n = FIVE_LETTER_WORDS.len()*self.candidates.len();
-        let buf = &mut buf[0..n];
-        crate::play::grade_many(FIVE_LETTER_WORDS.as_slice(), self.candidates.as_slice(), buf);
+        grade_many(FIVE_LETTER_WORDS.as_slice(), self.candidates.as_slice(), buf);
 
         for (i, guess) in FIVE_LETTER_WORDS.iter().copied().enumerate() {
           let mut mapping = FeedbackMap::with_capacity(8);
@@ -329,8 +324,7 @@ impl Guesser {
       possible_tiebreakers.sort_by_cached_key(|(w, _)| !w.is_unique());
 
       let mut om_buf = Vec::with_capacity(self.candidates.len());
-      unsafe { om_buf.set_len(self.candidates.len()); }
-      crate::play::grade_many(&self.candidates[0..1], self.candidates.as_slice(), om_buf.as_mut_slice());
+      grade_many(&self.candidates[0..1], self.candidates.as_slice(), &mut om_buf);
 
       let mut it = om_buf.into_iter();
       let mut organic_mappings = FeedbackMap::with_capacity(8);

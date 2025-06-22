@@ -16,6 +16,4 @@ rand = "0.9.1"
 [profile.dev]
 opt-level = 1
 incremental = true
-
-[profile.release]
 # lto = true

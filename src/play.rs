@@ -1,4 +1,4 @@
-use std::num::NonZero;
+use std::{num::NonZero, sync::Mutex};
 use arrayvec::ArrayVec;
 use crate::{guess::{LetterFeedback, WordFeedback}, word::Word};
 
@@ -14,49 +14,121 @@ pub fn check_word(word: Word, guess: Word) -> WordFeedback {
   ))
 }
 
-pub fn grade_many(guesses: &[Word], words: &[Word], feedback_buf: &mut [WordFeedback]) {
-  assert_eq!(feedback_buf.len(), guesses.len()*words.len());
-  let gs = unsafe { std::mem::transmute::<&[Word], &[[u8; 5]]>(guesses) };
-  let ws = unsafe { std::mem::transmute::<&[Word], &[[u8; 5]]>(words) };
-  let fb = feedback_buf;
+pub struct CartesianProduct<A: Iterator, B> {
+  a: A,
+  b: B,
+  curr: Option<(A::Item, B)>,
+}
 
-  const USE_MULTITHREADING: bool = true;
-  if USE_MULTITHREADING {
-    let num_threads = std::thread::available_parallelism()
-      .map(|n| n.min(unsafe { NonZero::new_unchecked(64) }))
-      .unwrap_or(const { unsafe { NonZero::<usize>::new_unchecked(1) } });
+impl<A: Iterator, B> CartesianProduct<A, B> {
+  fn new(a: A, b: B) -> Self {
+    Self { a, b, curr: None }
+  }
+}
 
-    std::thread::scope(|s| {
-      let _threads = gs.chunks((gs.len()/num_threads).max(1))
-        .zip(ws.chunks((ws.len()/num_threads).max(1)))
-        .zip(fb.chunks_mut((fb.len()/num_threads).max(1)))
-        .map(|((gs, ws), fb)| {
-        s.spawn(|| {
-          for ((w, g), fb) in gs.iter().flat_map(|g| ws.iter().zip(std::iter::repeat(g))).zip(fb.iter_mut()) {
-            *fb = WordFeedback::new(std::array::from_fn(|i|
-              if w[i] == g[i] {
-                LetterFeedback::Confirmed
-              } else if w.contains(&g[i]) {
-                LetterFeedback::Required
-              } else {
-                LetterFeedback::Excluded
-              }
-            ));
-          }
-        })
-      }).collect::<ArrayVec<_, 64>>();
-    });
-  } else {
-    for ((w, g), fb) in gs.iter().flat_map(|g| ws.iter().zip(std::iter::repeat(g))).zip(fb.iter_mut()) {
-      *fb = WordFeedback::new(std::array::from_fn(|i|
-        if w[i] == g[i] {
-          LetterFeedback::Confirmed
-        } else if w.contains(&g[i]) {
-          LetterFeedback::Required
+impl<A: Iterator<Item: Clone>, B: Iterator + Clone> Iterator for CartesianProduct<A, B> {
+  type Item = (A::Item, B::Item);
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    loop {
+      if self.curr.is_none() {
+        self.curr = self.a.next()
+          .map(|a| (a, self.b.clone()));
+      }
+
+      if let Some((ref a, ref mut b)) = self.curr {
+        if let Some(b) = b.next() {
+          break Some((a.clone(), b));
         } else {
-          LetterFeedback::Excluded
+          self.curr = None;
         }
-      ));
+      } else {
+        break None;
+      }
     }
+  }
+}
+
+impl<A: ExactSizeIterator, B: ExactSizeIterator> ExactSizeIterator for CartesianProduct<A, B> where Self: Iterator {
+  #[inline]
+  fn len(&self) -> usize {
+    self.a.len() * self.b.len() + match &self.curr {
+      Some((_, b)) => b.len(),
+      None => 0,
+    }
+  }
+}
+
+impl<A: Iterator<Item: Clone> + Clone, B: Clone + Iterator> Clone for CartesianProduct<A, B> {
+  #[inline]
+  fn clone(&self) -> Self {
+    Self {
+      a: self.a.clone(),
+      b: self.b.clone(),
+      curr: self.curr.clone(),
+    }
+  }
+}
+impl<A: Iterator<Item: Copy> + Copy, B: Copy + Iterator> Copy for CartesianProduct<A, B> {}
+
+impl<A: Iterator, B> std::iter::FusedIterator for CartesianProduct<A, B> where Self: Iterator {}
+
+#[inline]
+pub fn cartesian_prod<A, B>(a: A, b: B) -> CartesianProduct<A::IntoIter, B::IntoIter>
+where
+  A: IntoIterator,
+  B: IntoIterator,
+{
+  CartesianProduct::new(a.into_iter(), b.into_iter())
+}
+
+pub trait CartesianProductExt: Iterator {
+  #[inline]
+  fn cartesian_prod<U>(self, other: U) -> CartesianProduct<Self, U::IntoIter>
+  where
+    Self: Sized,
+    U: IntoIterator,
+  {
+    cartesian_prod(self.into_iter(), other)
+  }
+}
+
+impl<I: Iterator> CartesianProductExt for I {}
+
+pub fn grade_many<'g, 'w>(guesses: &'g [Word], words: &'w [Word], buffer: &mut [WordFeedback]) {
+  const ONE: NonZero<usize> = unsafe { NonZero::<usize>::new_unchecked(1) };
+
+  assert_eq!(buffer.len(), guesses.len()*words.len());
+
+  let work = guesses.iter().copied().cartesian_prod(words.iter().copied()).zip(buffer);
+
+  let n = std::thread::available_parallelism().unwrap_or(ONE);
+  if n == ONE {
+    // just use the current thread
+    for ((guess, word), buf) in work {
+      *buf = check_word(word, guess);
+    }
+  } else {
+    const CHUNK_SIZE: usize = 256;
+    let work = Mutex::new(work);
+    std::thread::scope(|s| {
+      const MAX_THREADS: usize = 256;
+      let mut threads = ArrayVec::<_, MAX_THREADS>::new();
+      for _ in 0..n.get() {
+        let thread = s.spawn(||
+          loop {
+            let group = match work.lock().unwrap().next_chunk::<CHUNK_SIZE>() {
+              Ok(x) => x.into_iter(),
+              Err(x) => if x.len() > 0 { x.into_iter() } else { return; }
+            };
+            for ((guess, word), buf) in group {
+              *buf = check_word(word, guess);
+            }
+          }
+        );
+        threads.push(thread);
+      }
+    });
   }
 }

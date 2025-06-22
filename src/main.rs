@@ -1,4 +1,4 @@
-#![feature(test, iter_next_chunk)]
+#![feature(test, impl_trait_in_fn_trait_return)]
 
 use std::{io::stdin, num::NonZeroUsize, sync::OnceLock};
 use arrayvec::ArrayVec;
@@ -382,6 +382,7 @@ fn main() {
 mod tests {
   use crate::{dictionary::FIVE_LETTER_WORDS, guess::Guesser, play::{self, check_word}, Attempts};
   use rand::{prelude::*, rng};
+  use rayon::prelude::*;
   extern crate test;
 
   #[bench]
@@ -390,13 +391,13 @@ mod tests {
     let words = &FIVE_LETTER_WORDS[..64];
     let n = guesses.len()*words.len();
     let mut buffer = Vec::with_capacity(n);
-    unsafe { buffer.set_len(n); }
     b.iter(|| {
-      play::grade_many(
+      buffer.clear();
+      let it = play::grade_many(
         test::black_box(guesses),
         test::black_box(words),
-        &mut buffer[..],
-      );
+      ).map(|(_, _, x)| x);
+      buffer.par_extend(it);
     });
   }
 

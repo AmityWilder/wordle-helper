@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
+use rayon::prelude::*;
 use crate::{dictionary::*, play::grade_many, verbose_println, word::{Letter, Word}, OPTIONS};
 
 bitflags!{
@@ -284,7 +285,8 @@ impl Guesser {
       BUFFER.with_borrow_mut(|buf| {
         // Pretend the candidate IS the actual word.
         // If that were the case, how would our tiebreaker be judged?
-        grade_many(FIVE_LETTER_WORDS.as_slice(), self.candidates.as_slice(), buf);
+        buf.clear();
+        buf.par_extend(grade_many(FIVE_LETTER_WORDS.as_slice(), self.candidates.as_slice()).map(|(_, _, x)| x));
 
         for (i, guess) in FIVE_LETTER_WORDS.iter().copied().enumerate() {
           let mut mapping = FeedbackMap::with_capacity(8);
@@ -324,7 +326,7 @@ impl Guesser {
       possible_tiebreakers.sort_by_cached_key(|(w, _)| !w.is_unique());
 
       let mut om_buf = Vec::with_capacity(self.candidates.len());
-      grade_many(&self.candidates[0..1], self.candidates.as_slice(), &mut om_buf);
+      om_buf.par_extend(grade_many(&self.candidates[0..1], self.candidates.as_slice()).map(|(_, _, x)| x));
 
       let mut it = om_buf.into_iter();
       let mut organic_mappings = FeedbackMap::with_capacity(8);
